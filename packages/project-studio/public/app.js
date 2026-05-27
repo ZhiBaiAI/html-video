@@ -340,26 +340,107 @@ function renderChatLog() {
     </div></div>`;
     return;
   }
-  log.innerHTML = state.messages.map(renderMessage).join('');
+  log.innerHTML = state.messages.map((m, i) => renderMessage(m, i)).join('');
+  log.querySelectorAll('button.opt[data-opt-msg]').forEach((btn) => {
+    btn.onclick = () => {
+      const msgIdx = Number(btn.dataset.optMsg);
+      const optI = Number(btn.dataset.optI);
+      const m = state.messages[msgIdx];
+      if (!m || m.pickedOption) return;
+      const { options } = parseHvOptions(m.content ?? '');
+      if (!options) return;
+      const picked = options.options[optI];
+      const label = picked?.label ?? '';
+      m.pickedOption = label;
+      // Fire as a new user turn
+      pickAndSend(label);
+    };
+  });
   log.scrollTop = log.scrollHeight;
 }
 
-function renderMessage(m) {
+async function pickAndSend(label) {
+  // Stuff the textarea with the chosen label and send it as a normal turn
+  const ta = document.getElementById('composer-input');
+  if (ta) ta.value = label;
+  renderChatLog(); // shows the picked highlight on the previous message
+  await sendMessage();
+}
+
+function renderMessage(m, idx) {
   if (m.role === 'user') return `<div class="msg user">${esc(m.content)}</div>`;
   if (m.role === 'system') return `<div class="msg system">${esc(m.content)}</div>`;
   if (m.role === 'preview-event') return `<div class="msg preview-event">${esc(m.content)}</div>`;
   if (m.role === 'thinking') return `<div class="msg thinking">${esc(m.content || 'thinking')}</div>`;
+  // assistant: split out the hv-options block (if any), markdown the rest
+  const { prose, options } = parseHvOptions(m.content ?? '');
+  const optionsHtml = options ? renderOptionCard(options, m.pickedOption, idx) : '';
   return `<div class="msg assistant">
     <div class="role">${esc(m.agent ?? 'agent')}</div>
-    <div class="body">${md(m.content ?? '')}</div>
+    <div class="body">${md(prose)}${optionsHtml}</div>
   </div>`;
 }
 
+// === Markdown rendering ===
+// Uses `marked` from CDN for proper headings/lists/bold/links/code,
+// then DOMPurify to sanitize, so user prompts can't inject script tags
+// even if the agent echos them back.
 function md(text) {
-  let html = esc(text);
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, _l, b) => `<pre><code>${b}</code></pre>`);
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  if (!text) return '';
+  let html;
+  if (typeof window.marked !== 'undefined') {
+    try {
+      html = window.marked.parse(String(text), { breaks: true, gfm: true });
+    } catch {
+      html = esc(text);
+    }
+  } else {
+    // Fallback: render bare with line breaks if CDN failed to load
+    html = esc(text).replace(/\n/g, '<br>');
+  }
+  if (typeof window.DOMPurify !== 'undefined') {
+    return window.DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'u', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'ul', 'ol', 'li', 'a', 'code', 'pre', 'blockquote', 'hr', 'span'],
+      ALLOWED_ATTR: ['href', 'title', 'target', 'rel'],
+    });
+  }
   return html;
+}
+
+// === hv-options block parsing ===
+// Splits assistant text into prose + an optional ```hv-options``` block.
+function parseHvOptions(text) {
+  const m = /```hv-options\s*\n([\s\S]*?)```/i.exec(text);
+  if (!m) return { prose: text, options: null };
+  const prose = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).trim();
+  let parsed;
+  try { parsed = JSON.parse(m[1].trim()); }
+  catch { return { prose: text, options: null }; }
+  if (!parsed || !Array.isArray(parsed.options) || !parsed.question) {
+    return { prose: text, options: null };
+  }
+  return { prose, options: parsed };
+}
+
+function renderOptionCard(opts, picked, msgIdx) {
+  const allowFreeform = opts.allow_freeform !== false;
+  const optsHtml = (opts.options || []).map((o, i) => {
+    const label = o.label ?? String(o);
+    const hint = o.hint ?? '';
+    const isPicked = picked === label;
+    const cls = 'opt' + (isPicked ? ' picked' : '');
+    const disabled = picked && !isPicked ? 'disabled' : '';
+    return `<button class="${cls}" data-opt-msg="${msgIdx}" data-opt-i="${i}" ${disabled}>
+      <span class="label">${esc(label)}</span>
+      ${hint ? `<span class="hint">${esc(hint)}</span>` : ''}
+    </button>`;
+  }).join('');
+  return `<div class="opt-card">
+    <div class="question">${esc(opts.question)}</div>
+    <div class="opts">${optsHtml}</div>
+    ${allowFreeform && !picked ? '<div class="freeform-hint">…or type your own answer below.</div>' : ''}
+  </div>`;
 }
 
 // ============== preview ==============

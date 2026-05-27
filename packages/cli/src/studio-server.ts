@@ -483,7 +483,13 @@ function json(res: ServerResponse, code: number, body: unknown): void {
 async function serveFile(filePath: string, res: ServerResponse): Promise<void> {
   const ext = extname(filePath).toLowerCase();
   const buf = await readFile(filePath);
-  res.writeHead(200, { 'content-type': MIME[ext] ?? 'application/octet-stream' });
+  res.writeHead(200, {
+    'content-type': MIME[ext] ?? 'application/octet-stream',
+    // Studio is a local dev tool — always serve fresh so v0.x updates show
+    // up immediately on page load instead of being held in disk cache.
+    'cache-control': 'no-store, no-cache, must-revalidate',
+    pragma: 'no-cache',
+  });
   res.end(buf);
 }
 
@@ -694,7 +700,23 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
   parts.push(`- No explanation outside the code block when you draft.`);
   parts.push('');
   parts.push(`# When you don't draft this turn`);
-  parts.push(`- Reply in plain conversational text. No code block. Be concise.`);
+  parts.push(`- Reply in plain conversational text. Markdown is rendered: use **bold**, lists, and headings to keep replies readable.`);
+  parts.push(`- Be concise.`);
+  parts.push('');
+  parts.push(`# Multiple-choice question format (RECOMMENDED for short option sets)`);
+  parts.push(`When a question has a small set of natural options (2–6), present it as a clickable card.`);
+  parts.push(`Emit a fenced code block with the language tag "hv-options" containing valid JSON with this shape:`);
+  parts.push('');
+  parts.push(`  { "question": "...", "options": [{ "label": "...", "hint": "..." }, ...], "allow_freeform": true }`);
+  parts.push('');
+  parts.push(`Rules:`);
+  parts.push(`- Use 2–6 options. If a question is genuinely open-ended, ask in plain prose instead.`);
+  parts.push(`- Each option label is short (≤ 30 chars). \`hint\` is optional, one clarifying line.`);
+  parts.push(`- Concrete, distinct options scoped to the current project — don't invent choices the user wouldn't realistically pick.`);
+  parts.push(`- The hv-options block must be the only block in that turn (markdown preamble above is fine; no prose after).`);
+  parts.push(`- \`allow_freeform: true\` lets the user type a custom answer too — set this when applicable.`);
+  parts.push(`- Good moments: tone (Casual / Formal / Energetic), palette (Warm / Cool / Mono), keep-vs-replace decisions.`);
+  parts.push(`- Skip this format when there's no clean small set; just ask in prose.`);
 
   return parts.join('\n');
 }
