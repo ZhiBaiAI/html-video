@@ -401,7 +401,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         }
 
         // Persist assistant message — strip the html / graph blocks when present (UI sees summary line)
-        const persistText = summaryLine
+        let persistText = summaryLine
           ? assistantText
               .replace(/```html[#\w-]*[\s\S]*?```/gi, '')
               .replace(/```json#content-graph[\s\S]*?```/i, '')
@@ -410,6 +410,15 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               )
               .trim() || summaryLine
           : assistantText;
+
+        // Empty agent reply (no HTML, no graph, no prose) usually means the
+        // prompt confused the model into doing nothing. Give the user something
+        // actionable instead of a blank speech bubble.
+        if (!persistText.trim()) {
+          const fallback = '⚠️ The agent returned an empty reply. Try rephrasing your request — e.g. tell it the brand / topic / 1-2 concrete details, or which kind of frame you want first.';
+          res.write(`data: ${JSON.stringify({ type: 'text', chunk: fallback })}\n\n`);
+          persistText = fallback;
+        }
         history.push({
           role: 'assistant',
           agent: agentDef.id,
@@ -736,13 +745,92 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
   const baseHtml = priorHtml && priorHtml !== exampleHtml ? priorHtml : exampleHtml;
   const isFirstTurn = history.filter((m) => m.role === 'user').length <= 1;
 
+  // Detect "user is answering an hv-options card from the previous turn".
+  // Without this signal the agent re-runs its draft-vs-ask decision tree on
+  // a 4-character reply ("故障感预告片") and silently does neither, returning
+  // an empty string. When we know the answer, force-pick path B (draft) and
+  // tell the agent exactly which option the user took.
+  const lastAssistant = [...history].reverse().find((m) => m.role === 'assistant');
+  const prevHadOptions = !!lastAssistant && /```hv-options\s*\n[\s\S]*?```/i.test(lastAssistant.content);
+  const answeringOptions = prevHadOptions && !isFirstTurn;
+
   // Heuristic: a "concrete" first turn (≥ 8 words OR mentions a brand/product/topic
   // word) gets the direct-draft path. A short / vague turn gets the explorer path.
+  // When the user is answering options, treat the turn as concrete — they
+  // already made a choice, no point asking more questions.
   const concrete =
+    answeringOptions ||
     userText.trim().split(/\s+/).length >= 8 ||
     /brand|outro|intro|launch|demo|video|chart|data|product|tagline/i.test(userText);
 
   const parts: string[] = [];
+
+  // When the user is answering an hv-options card, return a stripped-down
+  // direct-draft prompt and skip the rest of the explorer/concrete branching.
+  // Empirically: a long branching prompt + a 4-character user reply makes
+  // claude --print return an empty string (Joey hit this on every 2nd turn).
+  if (answeringOptions) {
+    const optMatch = /```hv-options\s*\n([\s\S]*?)```/i.exec(lastAssistant!.content);
+    let question = '';
+    let pickedHint = '';
+    if (optMatch && optMatch[1]) {
+      try {
+        const parsed = JSON.parse(optMatch[1].trim());
+        question = String(parsed.question ?? '');
+        const matched = (parsed.options || []).find(
+          (o: { label?: string }) => o && o.label === userText.trim(),
+        );
+        if (matched && typeof matched === 'object' && 'hint' in matched) {
+          pickedHint = String((matched as { hint?: string }).hint ?? '');
+        }
+      } catch {
+        // ignore
+      }
+    }
+    const directParts: string[] = [];
+    directParts.push(
+      `Write a self-contained HTML video file based on the user's pick.`,
+    );
+    directParts.push('');
+    if (question) directParts.push(`Earlier question: ${question}`);
+    directParts.push(
+      `User's pick: ${userText.trim()}${pickedHint ? ` (${pickedHint})` : ''}`,
+    );
+    directParts.push('');
+    directParts.push(
+      `Constraints: full-bleed 1920×1080, opens with an animation timeline, inline CSS + JS, single complete <!doctype html>...</html> document. CDN imports (Tailwind, GSAP) are fine. Tag every visible text node with data-hv-text set to a stable key (brand_name, headline, item_1, cta…). No prose outside code blocks.`,
+    );
+    directParts.push('');
+    directParts.push(`Output ONE of these:`);
+    directParts.push(
+      `  A) Single HTML file in a fenced \`\`\`html block — for a single brand card / title moment.`,
+    );
+    directParts.push(
+      `  B) Multi-frame: first a \`\`\`json#content-graph block (schemaVersion:1, intent, nodes:[{id,kind:text|data|entity,durationSec,...}], edges:[{from,to,kind:sequence|dependency|contrast}]), then one complete HTML document per node in a fenced \`\`\`html#<nodeId> block — for a teaser / explainer / timeline.`,
+    );
+    directParts.push('');
+    directParts.push(
+      `For "预告片" / "teaser" / "explainer" / multi-step content, prefer B. Otherwise A.`,
+    );
+    directParts.push(
+      `Do NOT ask another multiple-choice question. Do NOT return an empty reply.`,
+    );
+    if (priorHtml && priorHtml !== exampleHtml) {
+      directParts.push('');
+      directParts.push(`Prior preview HTML (iterate on it, or replace if a different vibe is better):`);
+      directParts.push('```html');
+      directParts.push(priorHtml.slice(0, 4000));
+      directParts.push('```');
+    }
+    if (attachments.length > 0) {
+      directParts.push('');
+      directParts.push(`Attachments:`);
+      for (const a of attachments) {
+        directParts.push(`- [${a.kind}] ${a.filename} — ${a.path}`);
+      }
+    }
+    return directParts.join('\n');
+  }
 
   if (concrete) {
     // === Direct-draft path: minimal preamble, no decision tree, just go ===
