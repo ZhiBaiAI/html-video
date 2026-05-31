@@ -704,7 +704,9 @@
   .modal-close:hover { border-color: var(--accent); }
 
   .gallery { flex: 1; overflow-y: auto; display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; padding: 4px; }
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    grid-auto-rows: max-content; align-content: start;
+    gap: 16px; padding: 4px; }
   .gallery-card { background: var(--bg-panel); border: 1px solid var(--border);
     border-radius: var(--radius); overflow: hidden; cursor: pointer;
     transition: all .15s; display: flex; flex-direction: column; }
@@ -721,7 +723,7 @@
      black bar. padding-top:56.25% (= 9/16) reserves a real 16:9 box that
      the absolutely-positioned iframe fills. */
   .gallery-card .preview { padding-top: 56.25%; background: #000; position: relative;
-    overflow: hidden; }
+    overflow: hidden; flex: 0 0 auto; }
   .gallery-card .preview iframe { position: absolute; top: 0; left: 0;
     width: 1920px; height: 1080px; border: 0;
     transform: scale(var(--gallery-scale, 0.135));
@@ -730,6 +732,9 @@
   .gallery-card .preview.portrait { padding-top: 177.78%; width: 60%; margin: 0 auto; }
   .gallery-card .preview.portrait iframe { width: 1080px; height: 1920px;
     transform: scale(var(--gallery-scale, 0.24)); }
+  /* Poster-mode cards: the shipped SVG fills the 16:9 box directly. */
+  .gallery-card .preview img.poster { position: absolute; inset: 0;
+    width: 100%; height: 100%; object-fit: cover; display: block; }
 
   /* ===== Template fullscreen preview (the "confirm before applying" modal) ===== */
   .tpl-preview-modal { z-index: 1100; }
@@ -745,16 +750,19 @@
     border-radius: var(--radius-sm); }
   .tpl-preview-head .modal-close:hover { color: var(--text); background: var(--bg-subtle); }
   .tpl-preview-stage { flex: 1; background: #000; padding: 22px;
-    display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    display: flex; align-items: flex-start; justify-content: center;
+    overflow: auto; }
   .tpl-preview-frame { aspect-ratio: 16/9; background: #000; position: relative;
-    width: 100%; max-width: 100%; max-height: 100%; border-radius: var(--radius);
+    width: 100%; max-width: 100%; flex: 0 0 auto; border-radius: var(--radius);
     overflow: hidden; }
   .tpl-preview-frame.portrait { aspect-ratio: 9/16; max-width: none;
-    height: 100%; width: auto; }
+    width: min(46%, 420px); }
   .tpl-preview-frame iframe { position: absolute; top: 0; left: 0;
     width: 1920px; height: 1080px; border: 0;
     transform: scale(var(--tpl-preview-scale, 1)); transform-origin: top left; }
   .tpl-preview-frame.portrait iframe { width: 1080px; height: 1920px; }
+  .tpl-preview-frame img.poster { position: absolute; inset: 0; width: 100%;
+    height: 100%; object-fit: contain; background: #000; }
   .tpl-preview-foot { padding: 14px 18px; border-top: 1px solid var(--border);
     display: flex; gap: 10px; align-items: center; justify-content: flex-end;
     background: var(--bg-panel); }
@@ -770,10 +778,11 @@
   .tpl-preview-foot button.primary:hover { background: var(--accent-hover); }
   .tpl-preview-foot .meta { font-size: 11.5px; color: var(--text-muted);
     font-family: var(--font-mono); }
-  .gallery-card .meta { padding: 12px 14px; }
+  .gallery-card .meta { padding: 12px 14px; flex: 0 0 auto; }
   .gallery-card .meta .name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .gallery-card .meta .desc { font-size: 11.5px; color: var(--text-muted);
-    line-height: 1.5; height: 33px; overflow: hidden; }
+    line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
   .gallery-card .meta .tags { margin-top: 8px; display: flex; gap: 4px;
     flex-wrap: wrap; }
   .gallery-card .meta .tag { font-size: 9.5px; padding: 1px 7px;
@@ -895,7 +904,8 @@
     </div>
     <div class="tpl-preview-stage">
       <div class="tpl-preview-frame" id="tpl-preview-frame">
-        <iframe id="tpl-preview-iframe" sandbox="allow-scripts" src="about:blank"></iframe>
+        <iframe id="tpl-preview-iframe" sandbox="allow-scripts allow-same-origin" src="about:blank"></iframe>
+        <img id="tpl-preview-poster" class="poster" alt="" hidden />
       </div>
     </div>
     <div class="tpl-preview-foot">

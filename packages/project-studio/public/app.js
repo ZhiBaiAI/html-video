@@ -1867,9 +1867,17 @@ function openGallery() {
     const tags = (t.tags || []).slice(0, 4).map((tg) => `<span class="tag">${esc(tg)}</span>`).join('');
     const portrait = isPortraitTemplate(t);
     const entry = templateEntryPath(t);
+    // Poster-mode templates (entry only stitches sub-comps via
+    // data-composition-src) iframe-render blank until the HF player ships —
+    // show the shipped poster instead. Falls back to the iframe when the
+    // backend couldn't find a poster file (poster_url null).
+    const inner =
+      t.preview_mode === 'poster' && t.poster_url
+        ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(t.name ?? t.id)}" loading="lazy" />`
+        : `<iframe sandbox="allow-scripts allow-same-origin" src="/template-asset/${esc(t.id)}/${esc(entry)}" loading="lazy"></iframe>`;
     return `<div class="gallery-card${sel}" data-id="${t.id}">
       <div class="preview ${portrait ? 'portrait' : ''}" data-portrait="${portrait}">
-        <iframe sandbox="allow-scripts" src="/template-asset/${esc(t.id)}/${esc(entry)}" loading="lazy"></iframe>
+        ${inner}
       </div>
       <div class="meta">
         <div class="name">${esc(t.name)}</div>
@@ -1954,8 +1962,23 @@ function openTemplatePreviewModal(tpl) {
   frame.classList.toggle('portrait', portrait);
 
   const iframe = document.getElementById('tpl-preview-iframe');
+  const poster = document.getElementById('tpl-preview-poster');
   const entry = templateEntryPath(tpl);
-  iframe.src = `/template-asset/${encodeURIComponent(tpl.id)}/${entry}?t=${Date.now()}`;
+  // Poster-mode templates render blank in a live iframe (need the unbuilt HF
+  // player) — show the shipped poster instead. Fall back to the iframe if the
+  // backend reported no poster file (poster_url null).
+  const usePoster = tpl.preview_mode === 'poster' && tpl.poster_url;
+  if (usePoster) {
+    iframe.src = 'about:blank';
+    iframe.hidden = true;
+    poster.src = `${tpl.poster_url}?t=${Date.now()}`;
+    poster.hidden = false;
+  } else {
+    poster.src = '';
+    poster.hidden = true;
+    iframe.hidden = false;
+    iframe.src = `/template-asset/${encodeURIComponent(tpl.id)}/${entry}?t=${Date.now()}`;
+  }
 
   const apply = () => {
     const w = frame.clientWidth;
@@ -2016,6 +2039,8 @@ function closeTemplatePreviewModal() {
   // Stop the iframe from continuing to play in the background.
   const iframe = document.getElementById('tpl-preview-iframe');
   if (iframe) iframe.src = 'about:blank';
+  const poster = document.getElementById('tpl-preview-poster');
+  if (poster) { poster.src = ''; poster.hidden = true; }
   _tplPreviewCurrent = null;
 }
 
