@@ -712,10 +712,60 @@
     box-shadow: var(--shadow-md); }
   .gallery-card.selected { border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-soft); }
+  /* Use the same fixed-source-size + transform:scale trick as the main
+     preview iframe so 1920×1080 templates fit any card width without
+     being cropped by absolute-positioned elements at the right edge. */
   .gallery-card .preview { aspect-ratio: 16/9; background: #000; position: relative;
     overflow: hidden; }
-  .gallery-card .preview iframe { width: 200%; height: 200%; transform: scale(.5);
-    transform-origin: 0 0; border: 0; pointer-events: none; }
+  .gallery-card .preview iframe { position: absolute; top: 0; left: 0;
+    width: 1920px; height: 1080px; border: 0;
+    transform: scale(var(--gallery-scale, 0.135));
+    transform-origin: top left; pointer-events: none; }
+  /* Portrait templates (vignelli / 9:16) fit at a different aspect. */
+  .gallery-card .preview.portrait iframe { width: 1080px; height: 1920px;
+    transform: scale(var(--gallery-scale, 0.24)); }
+  .gallery-card .preview.portrait { aspect-ratio: 9/16; width: 60%;
+    margin: 0 auto; }
+
+  /* ===== Template fullscreen preview (the "confirm before applying" modal) ===== */
+  .tpl-preview-modal { z-index: 1100; }
+  .tpl-preview-modal .modal { width: min(1240px, 96vw); height: min(840px, 92vh);
+    padding: 0; display: flex; flex-direction: column; gap: 0; }
+  .tpl-preview-head { display: flex; align-items: center; gap: 14px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); }
+  .tpl-preview-head .name { font-size: 14.5px; font-weight: 500; flex: 0 0 auto; }
+  .tpl-preview-head .desc { font-size: 12px; color: var(--text-muted);
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tpl-preview-head .modal-close { background: transparent; border: 0;
+    color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px 8px;
+    border-radius: var(--radius-sm); }
+  .tpl-preview-head .modal-close:hover { color: var(--text); background: var(--bg-subtle); }
+  .tpl-preview-stage { flex: 1; background: #000; padding: 22px;
+    display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .tpl-preview-frame { aspect-ratio: 16/9; background: #000; position: relative;
+    width: 100%; max-width: 100%; max-height: 100%; border-radius: var(--radius);
+    overflow: hidden; }
+  .tpl-preview-frame.portrait { aspect-ratio: 9/16; max-width: none;
+    height: 100%; width: auto; }
+  .tpl-preview-frame iframe { position: absolute; top: 0; left: 0;
+    width: 1920px; height: 1080px; border: 0;
+    transform: scale(var(--tpl-preview-scale, 1)); transform-origin: top left; }
+  .tpl-preview-frame.portrait iframe { width: 1080px; height: 1920px; }
+  .tpl-preview-foot { padding: 14px 18px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+    background: var(--bg-panel); }
+  .tpl-preview-foot .grow { flex: 1; }
+  .tpl-preview-foot button { background: var(--bg-subtle);
+    border: 1px solid var(--border); color: var(--text); padding: 7px 14px;
+    border-radius: var(--radius-sm); cursor: pointer; font-size: 12.5px;
+    font-family: inherit; transition: border-color .12s; }
+  .tpl-preview-foot button:hover { border-color: var(--accent); }
+  .tpl-preview-foot button.primary { background: var(--accent);
+    border-color: var(--accent); color: var(--accent-fg); font-weight: 500;
+    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+  .tpl-preview-foot button.primary:hover { background: var(--accent-hover); }
+  .tpl-preview-foot .meta { font-size: 11.5px; color: var(--text-muted);
+    font-family: var(--font-mono); }
   .gallery-card .meta { padding: 12px 14px; }
   .gallery-card .meta .name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .gallery-card .meta .desc { font-size: 11.5px; color: var(--text-muted);
@@ -829,6 +879,27 @@
       <button class="modal-close" id="gallery-close" data-i18n="gallery.close">Close</button>
     </div>
     <div class="gallery" id="gallery"></div>
+  </div>
+</div>
+
+<div class="modal-bg tpl-preview-modal" id="tpl-preview-modal">
+  <div class="modal">
+    <div class="tpl-preview-head">
+      <div class="name" id="tpl-preview-name">—</div>
+      <div class="desc" id="tpl-preview-desc"></div>
+      <button class="modal-close" id="tpl-preview-close" aria-label="Close">✕</button>
+    </div>
+    <div class="tpl-preview-stage">
+      <div class="tpl-preview-frame" id="tpl-preview-frame">
+        <iframe id="tpl-preview-iframe" sandbox="allow-scripts" src="about:blank"></iframe>
+      </div>
+    </div>
+    <div class="tpl-preview-foot">
+      <div class="meta" id="tpl-preview-meta"></div>
+      <div class="grow"></div>
+      <button id="tpl-preview-cancel" data-i18n="tpl_preview.cancel">Cancel</button>
+      <button class="primary" id="tpl-preview-use" data-i18n="tpl_preview.use">Use this template</button>
+    </div>
   </div>
 </div>
 

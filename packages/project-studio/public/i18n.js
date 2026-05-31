@@ -170,6 +170,12 @@ const DICT = {
     'settings.about.related': 'Related',
 
     'toolbar.settings': 'Settings',
+
+    'tpl_preview.cancel': 'Cancel',
+    'tpl_preview.use': 'Use this template',
+    'tpl_preview.replace_confirm': 'Replace current template with "{name}"? Existing preview content stays put — the agent can rebuild on next chat.',
+    'tpl_preview.applied': 'Template: {name}',
+    'tpl_preview.fps_dur': '{fps}fps · {duration}s · {aspect}',
   },
 
   zh: {
@@ -321,6 +327,12 @@ const DICT = {
     'settings.about.related': '相关项目',
 
     'toolbar.settings': '设置',
+
+    'tpl_preview.cancel': '取消',
+    'tpl_preview.use': '使用此模板',
+    'tpl_preview.replace_confirm': '把当前模板替换为 "{name}"？现有预览不会被覆盖，下一轮 chat 时 agent 会按新模板重写。',
+    'tpl_preview.applied': '已切换模板：{name}',
+    'tpl_preview.fps_dur': '{fps}fps · {duration}秒 · {aspect}',
   },
 };
 

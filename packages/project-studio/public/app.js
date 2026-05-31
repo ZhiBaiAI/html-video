@@ -1857,31 +1857,166 @@ function openGallery() {
   if (!state.selected) return;
   document.getElementById('gallery-modal').classList.add('show');
   const grid = document.getElementById('gallery');
+
+  // Each card's iframe loads the template's actual entry HTML (`index.html`,
+  // dropped under templates/<id>/ so /template-asset/<id>/index.html serves
+  // it). The 1920×1080 (or 1080×1920) source is transform-scaled to fit
+  // the card via a CSS variable set per-card after layout.
   grid.innerHTML = state.templates.map(t => {
     const sel = state.selected?.templateId === t.id ? ' selected' : '';
     const tags = (t.tags || []).slice(0, 4).map((tg) => `<span class="tag">${esc(tg)}</span>`).join('');
+    const portrait = isPortraitTemplate(t);
+    const entry = templateEntryPath(t);
     return `<div class="gallery-card${sel}" data-id="${t.id}">
-      <div class="preview"><iframe sandbox="allow-scripts" src="/template-asset/${t.id}/source/index.html"></iframe></div>
+      <div class="preview ${portrait ? 'portrait' : ''}" data-portrait="${portrait}">
+        <iframe sandbox="allow-scripts" src="/template-asset/${esc(t.id)}/${esc(entry)}" loading="lazy"></iframe>
+      </div>
       <div class="meta">
         <div class="name">${esc(t.name)}</div>
-        <div class="desc">${esc(t.description)}</div>
+        <div class="desc">${esc(t.description ?? '')}</div>
         <div class="tags">${tags}</div>
       </div>
     </div>`;
   }).join('');
+
+  // Click → open the fullscreen preview modal so the user can confirm
+  // before applying. Replaces the old "click immediately replaces template"
+  // behaviour, which never let the user actually see the candidate first.
   grid.querySelectorAll('.gallery-card').forEach(card => {
-    card.onclick = async () => {
+    card.onclick = () => {
       const tid = card.dataset.id;
-      await API.setTemplate(state.selected.id, tid);
-      closeGallery();
-      await selectProject(state.selected.id); // re-fetch + re-render incl. text fields
-      toast(`Template: ${tid}`, 'success');
+      const tpl = state.templates.find((x) => x.id === tid);
+      if (tpl) openTemplatePreviewModal(tpl);
     };
   });
+
+  // Resize observer recomputes --gallery-scale per card so 1920×1080 fits
+  // the actual rendered card width.
+  setTimeout(() => applyGalleryScales(grid), 0);
+  if (galleryResizeObserver) galleryResizeObserver.disconnect();
+  galleryResizeObserver = new ResizeObserver(() => applyGalleryScales(grid));
+  grid.querySelectorAll('.gallery-card .preview').forEach((p) => galleryResizeObserver.observe(p));
+}
+
+let galleryResizeObserver = null;
+function applyGalleryScales(grid) {
+  grid.querySelectorAll('.gallery-card .preview').forEach((p) => {
+    const w = p.clientWidth;
+    if (!w) return;
+    const portrait = p.dataset.portrait === 'true';
+    const baseW = portrait ? 1080 : 1920;
+    p.style.setProperty('--gallery-scale', (w / baseW).toFixed(4));
+  });
+}
+
+function isPortraitTemplate(t) {
+  const aspects = t?.output?.resolution?.supported_aspects ?? [];
+  return aspects.includes('9:16') && !aspects.includes('16:9');
+}
+
+function templateEntryPath(t) {
+  // The template's entry HTML is declared as `source_entry` in its
+  // template.html-video.yaml — some templates use `source/index.html`,
+  // others a top-level `index.html`. The /api/templates response now
+  // surfaces this field; fall back to `index.html` only if it's missing.
+  const entry = t?.source_entry;
+  return typeof entry === 'string' && entry ? entry : 'index.html';
 }
 
 function closeGallery() {
   document.getElementById('gallery-modal').classList.remove('show');
+  if (galleryResizeObserver) {
+    galleryResizeObserver.disconnect();
+    galleryResizeObserver = null;
+  }
+}
+
+// ============== Template fullscreen preview ==============
+let _tplPreviewResizeObserver = null;
+let _tplPreviewCurrent = null;
+function openTemplatePreviewModal(tpl) {
+  _tplPreviewCurrent = tpl;
+  const modal = document.getElementById('tpl-preview-modal');
+  if (!modal) return;
+  modal.classList.add('show');
+
+  document.getElementById('tpl-preview-name').textContent = tpl.name ?? tpl.id;
+  document.getElementById('tpl-preview-desc').textContent = tpl.description ?? '';
+  const dur = tpl?.output?.duration?.default_sec ?? tpl?.output?.duration?.max_sec ?? '?';
+  const fps = tpl?.output?.fps?.default ?? '?';
+  const aspect = (tpl?.output?.resolution?.supported_aspects ?? [])[0] ?? '16:9';
+  document.getElementById('tpl-preview-meta').textContent = t('tpl_preview.fps_dur', {
+    fps, duration: dur, aspect,
+  });
+
+  const frame = document.getElementById('tpl-preview-frame');
+  const portrait = isPortraitTemplate(tpl);
+  frame.classList.toggle('portrait', portrait);
+
+  const iframe = document.getElementById('tpl-preview-iframe');
+  const entry = templateEntryPath(tpl);
+  iframe.src = `/template-asset/${encodeURIComponent(tpl.id)}/${entry}?t=${Date.now()}`;
+
+  const apply = () => {
+    const w = frame.clientWidth;
+    const h = frame.clientHeight;
+    if (!w || !h) return;
+    const baseW = portrait ? 1080 : 1920;
+    const baseH = portrait ? 1920 : 1080;
+    const s = Math.min(w / baseW, h / baseH);
+    frame.style.setProperty('--tpl-preview-scale', s.toFixed(4));
+  };
+  apply();
+  if (_tplPreviewResizeObserver) _tplPreviewResizeObserver.disconnect();
+  _tplPreviewResizeObserver = new ResizeObserver(apply);
+  _tplPreviewResizeObserver.observe(frame);
+
+  const useBtn = document.getElementById('tpl-preview-use');
+  const cancelBtn = document.getElementById('tpl-preview-cancel');
+  const closeBtn = document.getElementById('tpl-preview-close');
+
+  // If the project already has this template applied, downgrade the primary
+  // action to a no-op "in use" label so the user doesn't reapply needlessly.
+  const isCurrent = state.selected?.templateId === tpl.id;
+  useBtn.textContent = isCurrent
+    ? t('settings.agent.in_use')
+    : t('tpl_preview.use');
+  useBtn.disabled = isCurrent;
+
+  useBtn.onclick = async () => {
+    if (!state.selected) return;
+    // If the project already has a different template applied, confirm
+    // before replacing — the user may have been just exploring.
+    const current = state.selected.templateId;
+    if (current && current !== tpl.id) {
+      if (!confirm(t('tpl_preview.replace_confirm', { name: tpl.name ?? tpl.id }))) return;
+    }
+    useBtn.disabled = true;
+    try {
+      await API.setTemplate(state.selected.id, tpl.id);
+      closeTemplatePreviewModal();
+      closeGallery();
+      await selectProject(state.selected.id);
+      toast(t('tpl_preview.applied', { name: tpl.name ?? tpl.id }), 'success');
+    } finally {
+      useBtn.disabled = false;
+    }
+  };
+  cancelBtn.onclick = closeTemplatePreviewModal;
+  closeBtn.onclick = closeTemplatePreviewModal;
+}
+
+function closeTemplatePreviewModal() {
+  const modal = document.getElementById('tpl-preview-modal');
+  if (modal) modal.classList.remove('show');
+  if (_tplPreviewResizeObserver) {
+    _tplPreviewResizeObserver.disconnect();
+    _tplPreviewResizeObserver = null;
+  }
+  // Stop the iframe from continuing to play in the background.
+  const iframe = document.getElementById('tpl-preview-iframe');
+  if (iframe) iframe.src = 'about:blank';
+  _tplPreviewCurrent = null;
 }
 
 // ============== new-project modal ==============
