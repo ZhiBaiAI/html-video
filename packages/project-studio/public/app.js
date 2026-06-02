@@ -2255,18 +2255,29 @@ function wireModals() {
 }
 
 // ============== Settings modal ==============
-const AGENT_ICONS = {
+// Real brand logos (SVG, copied from open-design/agent-icons). Served from
+// /agent-icons/<id>.svg. Agents without a brand logo fall back to a glyph.
+const AGENT_LOGOS = {
+  'claude': '/agent-icons/claude.svg',
+  'cursor-agent': '/agent-icons/cursor-agent.svg',
+  'codex': '/agent-icons/codex.svg',
+  'hermes': '/agent-icons/hermes.svg',
+};
+const AGENT_ICON_FALLBACK = {
   'anthropic-api': '☁️',
-  'claude': '🟧',
-  'cursor-agent': '🟦',
-  'hermes': '🌀',
   'gemini': '🟦',
   'grok': '🟪',
 };
+function agentIconHtml(id) {
+  const logo = AGENT_LOGOS[id];
+  if (logo) return `<img src="${esc(logo)}" alt="" class="agent-logo" />`;
+  return AGENT_ICON_FALLBACK[id] || '⚙️';
+}
 const AGENT_DESC = {
   'anthropic-api': 'Direct Messages API · streams reliably',
   'claude': 'Claude Code (claude --print)',
   'cursor-agent': 'Cursor command line',
+  'codex': 'Codex CLI (codex exec)',
   'hermes': 'Hermes ACP CLI',
 };
 
@@ -2287,9 +2298,82 @@ function closeSettingsModal() {
 function renderSettingsPanel(tab) {
   const panel = document.getElementById('settings-panel');
   if (!panel) return;
+  if (tab === 'audio') return renderSettingsAudio(panel);
   if (tab === 'language') return renderSettingsLanguage(panel);
   if (tab === 'about') return renderSettingsAbout(panel);
   return renderSettingsAgent(panel);
+}
+
+async function renderSettingsAudio(panel) {
+  panel.innerHTML = `
+    <h3>${esc(t('settings.audio.title'))}</h3>
+    <div class="panel-sub">${esc(t('settings.audio.subtitle'))}</div>
+    <div class="audio-config" id="audio-config">
+      <div class="audio-status" id="audio-status">${esc(t('settings.audio.loading'))}</div>
+      <label class="audio-field">
+        <span>${esc(t('settings.audio.api_key'))}</span>
+        <input type="password" id="mm-api-key" placeholder="${esc(t('settings.audio.api_key_placeholder'))}" autocomplete="off" />
+      </label>
+      <label class="audio-field">
+        <span>${esc(t('settings.audio.base_url'))}</span>
+        <input type="text" id="mm-base-url" placeholder="https://api.minimaxi.chat/v1" autocomplete="off" />
+      </label>
+      <div class="audio-actions">
+        <button class="audio-save primary-action" id="mm-save" style="background:var(--accent);border-color:var(--accent);color:var(--accent-fg)">${esc(t('settings.audio.save'))}</button>
+        <button class="audio-clear" id="mm-clear">${esc(t('settings.audio.clear'))}</button>
+        <span class="audio-save-state" id="mm-save-state"></span>
+      </div>
+      <p class="panel-sub" style="font-size:11.5px;margin-top:4px">${esc(t('settings.audio.hint'))}</p>
+    </div>
+  `;
+
+  const statusEl = panel.querySelector('#audio-status');
+  const keyInput = panel.querySelector('#mm-api-key');
+  const baseInput = panel.querySelector('#mm-base-url');
+  const saveState = panel.querySelector('#mm-save-state');
+
+  const refresh = async () => {
+    try {
+      const s = await fetch('/api/config/minimax').then((r) => r.json());
+      if (s.configured) {
+        const src = s.source === 'env' ? t('settings.audio.source_env') : t('settings.audio.source_config');
+        statusEl.innerHTML = `<span class="agent-status-dot ok"></span>${esc(t('settings.audio.configured', { key: s.maskedKey, source: src }))}`;
+        if (s.baseUrl) baseInput.value = s.baseUrl;
+      } else {
+        statusEl.innerHTML = `<span class="agent-status-dot missing"></span>${esc(t('settings.audio.not_configured'))}`;
+      }
+    } catch {
+      statusEl.textContent = t('settings.audio.not_configured');
+    }
+  };
+  await refresh();
+
+  panel.querySelector('#mm-save').onclick = async () => {
+    const apiKey = keyInput.value.trim();
+    if (!apiKey) { saveState.textContent = t('settings.audio.need_key'); return; }
+    saveState.textContent = t('settings.audio.saving');
+    try {
+      const r = await fetch('/api/config/minimax', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ apiKey, baseUrl: baseInput.value.trim() }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      keyInput.value = '';
+      saveState.textContent = t('settings.audio.saved');
+      await refresh();
+    } catch (e) {
+      saveState.textContent = t('settings.audio.save_failed', { message: (e?.message ?? e) });
+    }
+  };
+
+  panel.querySelector('#mm-clear').onclick = async () => {
+    await fetch('/api/config/minimax', { method: 'DELETE' });
+    keyInput.value = '';
+    baseInput.value = '';
+    saveState.textContent = '';
+    await refresh();
+  };
 }
 
 function renderSettingsAgent(panel) {
@@ -2335,7 +2419,7 @@ function renderSettingsAgent(panel) {
         const isCurrent = a.id === currentId && a.available;
         const desc = AGENT_DESC[a.id] || (a.bin ?? '');
         const ver = a.version ? esc(a.version) : (a.available ? '' : esc(t('settings.agent.unavailable')));
-        const icon = AGENT_ICONS[a.id] || '⚙️';
+        const icon = agentIconHtml(a.id);
         return `<div class="agent-card ${isCurrent ? 'selected' : ''}" data-agent-id="${esc(a.id)}">
           <div class="agent-icon">${icon}</div>
           <div class="agent-meta">

@@ -4,10 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>html-video · Studio</title>
-<link rel="stylesheet" href="/tokens.css?v=0.7" />
+<link rel="stylesheet" href="/tokens.css?v=0.9-hyperframes" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&display=swap" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/marked@14.1.4/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
 <style>
@@ -129,6 +129,8 @@
     box-shadow: 0 0 0 2px var(--accent-soft); }
   .agent-card .agent-icon { width: 36px; height: 36px; border-radius: var(--radius-sm);
     display: grid; place-items: center; background: var(--bg-subtle); font-size: 18px; }
+  .agent-card .agent-icon .agent-logo { width: 22px; height: 22px; object-fit: contain;
+    display: block; }
   .agent-card .agent-meta .agent-name { font-size: 13.5px; font-weight: 500; color: var(--text); }
   .agent-card .agent-meta .agent-desc { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
   .agent-card .agent-meta .agent-version { font-size: 11px; color: var(--text-faint);
@@ -147,6 +149,22 @@
     background: var(--bg-subtle); border-radius: var(--radius-sm); }
   .settings-panel .agent-test-result.ok { color: var(--green, #4ade80); }
   .settings-panel .agent-test-result.error { color: rgb(220, 60, 60); }
+  .audio-config { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
+  .audio-status { font-size: 12.5px; color: var(--text-muted); display: flex;
+    align-items: center; gap: 8px; }
+  .audio-field { display: flex; flex-direction: column; gap: 5px; }
+  .audio-field > span { font-size: 11.5px; color: var(--text-muted); }
+  .audio-field input { background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius-sm); padding: 9px 12px;
+    font: inherit; font-size: 12.5px; font-family: var(--font-mono); }
+  .audio-field input:focus { outline: none; border-color: var(--accent); }
+  .audio-actions { display: flex; align-items: center; gap: 10px; }
+  .audio-actions button { padding: 7px 16px; border-radius: var(--radius-sm);
+    cursor: pointer; font-size: 12.5px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); }
+  .audio-actions .audio-save { border: 0; font-weight: 500; }
+  .audio-actions .audio-save-state { font-size: 11.5px; color: var(--text-muted);
+    font-family: var(--font-mono); }
 
   /* Settings: Language panel */
   .lang-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -973,6 +991,10 @@
         <button class="settings-nav-item active" data-settings-tab="agent">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21V12M4 6V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 12h4M10 8h4M18 16h4"/></svg>
           <span data-i18n="settings.tab.agent">Agent</span>
+        </button>
+        <button class="settings-nav-item" data-settings-tab="audio">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10v4M7 7v10M11 4v16M15 8v8M19 11v2"/></svg>
+          <span data-i18n="settings.tab.audio">Audio</span>
         </button>
         <button class="settings-nav-item" data-settings-tab="language">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8h12M9 4v4M14 13l-4 7M14 13l4 7M11 17h6"/></svg>

@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import type { CliContext } from './context.js';
-import { AssetStore, resolveMinimaxCredentials, generateTts, generateMusic } from '@html-video/core';
+import { AssetStore, generateTts, generateMusic } from '@html-video/core';
 import { detectAll, findAgent, spawnAgent } from '@html-video/runtime';
 
 interface StudioHandle {
@@ -361,12 +361,12 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         const sse = (obj: unknown) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
         try {
           sse({ type: 'audio_started' });
-          const creds = resolveMinimaxCredentials();
+          const creds = ctx.mediaConfig.resolveMinimax();
           if (!creds) {
             sse({
               type: 'audio_failed',
               message:
-                'MiniMax API key not configured — set OD_MINIMAX_API_KEY (or MINIMAX_API_KEY) in the environment.',
+                'MiniMax API key not configured — add it in Settings → Audio (or set OD_MINIMAX_API_KEY).',
             });
             res.end();
             return;
@@ -465,6 +465,23 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         const args = platform === 'darwin' ? ['-R', target] : [target];
         spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
         return json(res, 200, { ok: true, target, platform });
+      }
+
+      // MiniMax audio API config — GET status (masked), POST to save, DELETE to clear.
+      // Lets users configure the key in the Settings UI instead of env vars.
+      if (url.pathname === '/api/config/minimax' && m === 'GET') {
+        return json(res, 200, ctx.mediaConfig.getMinimaxStatus());
+      }
+      if (url.pathname === '/api/config/minimax' && m === 'POST') {
+        const body = (await readBody(req)) as { apiKey?: string; baseUrl?: string };
+        const key = (body.apiKey ?? '').trim();
+        if (!key) return json(res, 400, { error: 'apiKey is required' });
+        ctx.mediaConfig.setMinimax(key, body.baseUrl);
+        return json(res, 200, ctx.mediaConfig.getMinimaxStatus());
+      }
+      if (url.pathname === '/api/config/minimax' && m === 'DELETE') {
+        ctx.mediaConfig.clearMinimax();
+        return json(res, 200, ctx.mediaConfig.getMinimaxStatus());
       }
 
       // Agents (detected on each call; cheap thanks to the in-process cache)

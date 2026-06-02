@@ -13,6 +13,7 @@ import {
   TemplateRegistry,
 } from '@html-video/core';
 import hfAdapter from '@html-video/adapter-hyperframes';
+import { MediaConfigStore } from './media-config.js';
 
 export interface CliContext {
   projectRoot: string;
@@ -22,6 +23,7 @@ export interface CliContext {
   assets: AssetStore;
   orchestrator: ProjectOrchestrator;
   templatesDir: string;
+  mediaConfig: MediaConfigStore;
 }
 
 export function findProjectRoot(start: string = process.cwd()): string {
@@ -70,5 +72,7 @@ export async function bootstrap(opts: { cwd?: string } = {}): Promise<CliContext
     assets,
   });
 
-  return { projectRoot, engines, templates, projects, assets, orchestrator, templatesDir };
+  const mediaConfig = new MediaConfigStore(projectRoot);
+
+  return { projectRoot, engines, templates, projects, assets, orchestrator, templatesDir, mediaConfig };
 }
