@@ -46,7 +46,7 @@ export async function render(input: RenderInput, ctx: RenderContext): Promise<Re
     );
   }
 
-  const totalDuration =
+  let totalDuration =
     input.config.duration === 'auto' ? 5 : Math.max(0.5, Number(input.config.duration));
   const { width, height } = input.config.resolution;
   const fps = input.config.fps || 30;
@@ -81,6 +81,36 @@ export async function render(input: RenderInput, ctx: RenderContext): Promise<Re
     // Pages sometimes set up animations on the load tick — give a frame
     // for animations to actually start before we count the duration.
     await page.waitForTimeout(100);
+
+    // Probe the frame's own animation length so we never cut it off. A short
+    // per-frame duration set by the user could be < the frame's opening
+    // animation, truncating it mid-play. Take the longer of the two: the frame
+    // gets at least as long as its non-looping CSS animations / GSAP timeline.
+    try {
+      const animMs = await page.evaluate(() => {
+        let maxMs = 0;
+        Array.from(document.querySelectorAll('*')).forEach((el) => {
+          const s = getComputedStyle(el);
+          const durs = (s.animationDuration || '').split(',');
+          const dels = (s.animationDelay || '').split(',');
+          const iters = (s.animationIterationCount || '').split(',');
+          durs.forEach((d, i) => {
+            if ((iters[i] || '').trim() === 'infinite') return; // ignore looping bg anims
+            maxMs = Math.max(maxMs, ((parseFloat(d) || 0) + (parseFloat(dels[i] || '0') || 0)) * 1000);
+          });
+        });
+        const g = (window as unknown as { gsap?: { globalTimeline?: { totalDuration(): number } } }).gsap;
+        const gsapMs = g?.globalTimeline ? g.globalTimeline.totalDuration() * 1000 : 0;
+        return Math.max(maxMs, gsapMs);
+      });
+      // +0.4s settle so the final animation frame is actually captured; cap at
+      // 30s so a stray huge value can't make a frame run away.
+      const needed = Math.min(30, (animMs + 400) / 1000);
+      if (needed > totalDuration) {
+        ctx.onProgress?.(38, `extending to ${needed.toFixed(1)}s for animation`);
+        totalDuration = needed;
+      }
+    } catch { /* probe failed — fall back to the requested duration */ }
 
     ctx.onProgress?.(40, `recording ${totalDuration}s`);
     // Stream a single coarse progress tick per second so the user sees
