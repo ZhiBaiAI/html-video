@@ -49,6 +49,9 @@
   .agent-switch { position: relative; }
   .toolbar .pick-btn.agent-pill { min-width: 0; }
   .toolbar-section.model-switch { display: flex; align-items: center; gap: 6px; }
+  /* [hidden] sets display:none, but the flex rule above would override it —
+     restore it so the picker truly hides for non-AMR agents. */
+  .toolbar-section.model-switch[hidden] { display: none; }
   .model-select { font-size: 12px; padding: 5px 8px; border-radius: var(--radius-sm);
     background: var(--bg); border: 1px solid var(--border); color: var(--text); cursor: pointer;
     max-width: 180px; }
