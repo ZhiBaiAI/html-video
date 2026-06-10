@@ -14,10 +14,38 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolveMinimaxCredentials, type MinimaxCredentials } from '@html-video/core';
+import {
+  resolveBailianCredentials,
+  resolveMinimaxCredentials,
+  type BailianCredentials,
+  type BailianMinimaxTtsModel,
+  type MinimaxCredentials,
+} from '@html-video/core';
+
+export type NarrationProvider = 'minimax' | 'bailian';
+
+export interface NarrationConfig {
+  provider: NarrationProvider;
+  model: BailianMinimaxTtsModel;
+}
+
+export interface ClonedNarrationVoice {
+  id: string;
+  name: string;
+  model: BailianMinimaxTtsModel;
+  audioUrl: string;
+  createdAt: string;
+}
 
 interface MediaConfig {
   minimax?: { apiKey?: string; baseUrl?: string };
+  bailian?: { apiKey?: string; baseUrl?: string };
+  narration?: {
+    provider?: NarrationProvider;
+    model?: BailianMinimaxTtsModel;
+    clonedVoices?: ClonedNarrationVoice[];
+    defaultVoiceId?: string;
+  };
 }
 
 export class MediaConfigStore {
@@ -85,6 +113,171 @@ export class MediaConfigStore {
       return { apiKey: cfg.apiKey, baseUrl };
     }
     return resolveMinimaxCredentials();
+  }
+
+  getNarrationStatus(): NarrationConfig & {
+    configured: boolean;
+    source: 'config' | 'env' | 'none';
+    maskedKey: string;
+    baseUrl: string;
+  } {
+    const cfg = this.read();
+    const provider = cfg.narration?.provider ?? 'minimax';
+    const model = cfg.narration?.model ?? 'MiniMax/speech-02-turbo';
+    if (provider === 'bailian') {
+      const stored = cfg.bailian;
+      if (stored?.apiKey) {
+        return {
+          provider,
+          model,
+          configured: true,
+          source: 'config',
+          maskedKey: mask(stored.apiKey),
+          baseUrl: stored.baseUrl ?? 'https://dashscope.aliyuncs.com/api/v1',
+        };
+      }
+      const env = resolveBailianCredentials();
+      return {
+        provider,
+        model,
+        configured: !!env,
+        source: env ? 'env' : 'none',
+        maskedKey: env ? mask(env.apiKey) : '',
+        baseUrl: env?.baseUrl ?? 'https://dashscope.aliyuncs.com/api/v1',
+      };
+    }
+    return { provider, model, ...this.getMinimaxStatus() };
+  }
+
+  setNarration(opts: {
+    provider: NarrationProvider;
+    model?: BailianMinimaxTtsModel;
+    apiKey?: string;
+    baseUrl?: string;
+  }): void {
+    const cfg = this.read();
+    cfg.narration = {
+      ...(cfg.narration ?? {}),
+      provider: opts.provider,
+      model: opts.model ?? 'MiniMax/speech-02-turbo',
+    };
+    const apiKey = (opts.apiKey ?? '').trim();
+    const baseUrl = (opts.baseUrl ?? '').trim().replace(/\/$/, '');
+    if (opts.provider === 'bailian' && apiKey) {
+      cfg.bailian = { apiKey, ...(baseUrl ? { baseUrl } : {}) };
+    } else if (opts.provider === 'minimax' && apiKey) {
+      cfg.minimax = { apiKey, ...(baseUrl ? { baseUrl } : {}) };
+    }
+    this.write(cfg);
+  }
+
+  clearNarration(): void {
+    const cfg = this.read();
+    const provider = cfg.narration?.provider ?? 'minimax';
+    if (provider === 'bailian') delete cfg.bailian;
+    else delete cfg.minimax;
+    if (cfg.narration?.clonedVoices?.length || cfg.narration?.defaultVoiceId) {
+      delete cfg.narration.provider;
+      delete cfg.narration.model;
+    } else {
+      delete cfg.narration;
+    }
+    this.write(cfg);
+  }
+
+  resolveNarration():
+    | { provider: 'minimax'; creds: MinimaxCredentials }
+    | { provider: 'bailian'; creds: BailianCredentials; model: BailianMinimaxTtsModel }
+    | null {
+    const cfg = this.read();
+    const provider = cfg.narration?.provider ?? 'minimax';
+    if (provider === 'bailian') {
+      const stored = cfg.bailian;
+      const creds = stored?.apiKey
+        ? {
+            apiKey: stored.apiKey,
+            baseUrl: (stored.baseUrl || 'https://dashscope.aliyuncs.com/api/v1').replace(/\/$/, ''),
+          }
+        : resolveBailianCredentials();
+      return creds
+        ? {
+            provider,
+            creds,
+            model: cfg.narration?.model ?? 'MiniMax/speech-02-turbo',
+          }
+        : null;
+    }
+    const creds = this.resolveMinimax();
+    return creds ? { provider, creds } : null;
+  }
+
+  resolveBailian(): BailianCredentials | null {
+    const stored = this.read().bailian;
+    if (stored?.apiKey) {
+      return {
+        apiKey: stored.apiKey,
+        baseUrl: (stored.baseUrl || 'https://dashscope.aliyuncs.com/api/v1').replace(/\/$/, ''),
+      };
+    }
+    return resolveBailianCredentials();
+  }
+
+  listClonedVoices(): { voices: ClonedNarrationVoice[]; defaultVoiceId?: string } {
+    const narration = this.read().narration;
+    return {
+      voices: [...(narration?.clonedVoices ?? [])],
+      ...(narration?.defaultVoiceId ? { defaultVoiceId: narration.defaultVoiceId } : {}),
+    };
+  }
+
+  getClonedVoice(voiceId: string): ClonedNarrationVoice | undefined {
+    return this.read().narration?.clonedVoices?.find((voice) => voice.id === voiceId);
+  }
+
+  addClonedVoice(voice: ClonedNarrationVoice): void {
+    const cfg = this.read();
+    const narration = cfg.narration ?? {
+      provider: 'bailian' as const,
+      model: voice.model,
+    };
+    const voices = narration.clonedVoices ?? [];
+    if (voices.some((item) => item.id === voice.id)) {
+      throw new Error(`Voice ID already exists locally: ${voice.id}`);
+    }
+    narration.clonedVoices = [...voices, voice];
+    narration.defaultVoiceId ??= voice.id;
+    cfg.narration = narration;
+    this.write(cfg);
+  }
+
+  updateClonedVoice(
+    voiceId: string,
+    opts: { name?: string; isDefault?: boolean },
+  ): ClonedNarrationVoice {
+    const cfg = this.read();
+    const narration = cfg.narration;
+    const voices = narration?.clonedVoices ?? [];
+    const index = voices.findIndex((voice) => voice.id === voiceId);
+    if (index < 0) throw new Error(`Cloned voice not found: ${voiceId}`);
+    const current = voices[index]!;
+    const name = (opts.name ?? '').trim();
+    const updated = { ...current, ...(name ? { name } : {}) };
+    voices[index] = updated;
+    narration!.clonedVoices = voices;
+    if (opts.isDefault) narration!.defaultVoiceId = voiceId;
+    this.write(cfg);
+    return updated;
+  }
+
+  removeClonedVoice(voiceId: string): void {
+    const cfg = this.read();
+    const narration = cfg.narration;
+    if (!narration) return;
+    narration.clonedVoices = (narration.clonedVoices ?? []).filter((voice) => voice.id !== voiceId);
+    if (narration.defaultVoiceId === voiceId) {
+      narration.defaultVoiceId = narration.clonedVoices[0]?.id;
+    }
+    this.write(cfg);
   }
 }
 

@@ -19,3 +19,14 @@ export {
   generateMusic,
 } from './minimax.js';
 export type { MinimaxCredentials, MinimaxAudioResult } from './minimax.js';
+export {
+  BAILIAN_MINIMAX_TTS_MODELS,
+  cloneBailianMinimaxVoice,
+  generateBailianTts,
+  resolveBailianCredentials,
+} from './bailian.js';
+export type {
+  BailianCredentials,
+  BailianMinimaxTtsModel,
+  BailianVoiceCloneResult,
+} from './bailian.js';

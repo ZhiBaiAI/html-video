@@ -212,10 +212,10 @@
     align-items: center; gap: 8px; }
   .audio-field { display: flex; flex-direction: column; gap: 5px; }
   .audio-field > span { font-size: 11.5px; color: var(--text-muted); }
-  .audio-field input { background: var(--bg); border: 1px solid var(--border);
+  .audio-field input, .audio-field select { background: var(--bg); border: 1px solid var(--border);
     color: var(--text); border-radius: var(--radius-sm); padding: 9px 12px;
     font: inherit; font-size: 12.5px; font-family: var(--font-mono); }
-  .audio-field input:focus { outline: none; border-color: var(--accent); }
+  .audio-field input:focus, .audio-field select:focus { outline: none; border-color: var(--accent); }
   .audio-actions { display: flex; align-items: center; gap: 10px; }
   .audio-actions button { padding: 7px 16px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 12.5px; border: 1px solid var(--border);
@@ -223,6 +223,34 @@
   .audio-actions .audio-save { border: 0; font-weight: 500; }
   .audio-actions .audio-save-state { font-size: 11.5px; color: var(--text-muted);
     font-family: var(--font-mono); }
+  .voice-clone-settings { border-top: 1px solid var(--border); padding-top: 18px;
+    display: flex; flex-direction: column; gap: 12px; }
+  .voice-clone-settings h4 { margin: 0; font-size: 13px; font-weight: 600; }
+  .voice-clone-settings .panel-sub { margin: -6px 0 2px; }
+  .voice-clone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .voice-clone-wide { grid-column: 1 / -1; }
+  #clone-preview audio { width: 100%; height: 32px; }
+  .voice-library { display: flex; flex-direction: column; gap: 8px; }
+  .voice-library-empty { border: 1px dashed var(--border); border-radius: var(--radius-sm);
+    padding: 14px; color: var(--text-muted); font-size: 12px; text-align: center; }
+  .voice-library-item { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px; background: var(--bg-panel); }
+  .voice-library-main { min-width: 0; display: grid; grid-template-columns: minmax(120px, 1fr) auto;
+    gap: 4px 10px; align-items: center; flex: 1; }
+  .voice-library-main input { min-width: 0; background: transparent; border: 0;
+    border-bottom: 1px solid var(--border); color: var(--text); padding: 3px 0; font: inherit; }
+  .voice-library-main code { color: var(--accent); font-size: 10.5px; }
+  .voice-library-main span { grid-column: 1 / -1; color: var(--text-muted); font-size: 10.5px; }
+  .voice-library-actions { display: flex; gap: 5px; align-items: center; flex-wrap: wrap;
+    justify-content: flex-end; }
+  .voice-library-actions button { background: var(--bg); border: 1px solid var(--border);
+    color: var(--text-muted); border-radius: var(--radius-sm); padding: 4px 7px;
+    cursor: pointer; font-size: 10.5px; }
+  .voice-library-actions button:hover { border-color: var(--accent); color: var(--accent); }
+  .voice-library-actions button.danger:hover { border-color: rgb(220,60,60); color: rgb(220,60,60); }
+  .voice-library-actions b { color: var(--accent); font-size: 10.5px; }
+  .voice-library-note { margin: 0 !important; font-size: 11px !important; }
 
   /* Settings: Language panel */
   .lang-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

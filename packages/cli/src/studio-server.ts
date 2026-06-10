@@ -11,7 +11,13 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import type { CliContext } from './context.js';
-import { AssetStore, generateTts, generateMusic } from '@html-video/core';
+import {
+  AssetStore,
+  cloneBailianMinimaxVoice,
+  generateBailianTts,
+  generateTts,
+  generateMusic,
+} from '@html-video/core';
 import { extractUrls, fetchSource } from './fetch-source.js';
 import { detectAll, findAgent, spawnAgent } from '@html-video/runtime';
 
@@ -434,7 +440,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         try {
           sse({ type: 'audio_started' });
           const creds = ctx.mediaConfig.resolveMinimax();
-          if (!creds) {
+          if (body.music?.prompt?.trim() && !creds) {
             sse({
               type: 'audio_failed',
               message:
@@ -459,7 +465,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             const music = await generateMusic({
               prompt: body.music!.prompt!.trim(),
               instrumental: body.music!.instrumental ?? true,
-              creds,
+              creds: creds!,
             });
             const { asset } = await ctx.orchestrator.addBufferAsset(
               projectId,
@@ -475,12 +481,27 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
 
           if (wantNarration) {
             sse({ type: 'audio_progress', stage: 'narration', message: 'generating narration…' });
-            const nar = await generateTts({
+            const narration = ctx.mediaConfig.resolveNarration();
+            if (!narration) {
+              throw new Error('Narration API key not configured - add it in Settings > Audio.');
+            }
+            const shared = {
               text: body.narration!.text!.trim(),
               ...(body.narration!.voiceId !== undefined && { voiceId: body.narration!.voiceId }),
-              ...(body.narration!.languageBoost !== undefined && { languageBoost: body.narration!.languageBoost }),
-              creds,
-            });
+            };
+            const nar = narration.provider === 'bailian'
+              ? await generateBailianTts({
+                  ...shared,
+                  model: body.narration!.voiceId
+                    ? (ctx.mediaConfig.getClonedVoice(body.narration!.voiceId)?.model ?? narration.model)
+                    : narration.model,
+                  creds: narration.creds,
+                })
+              : await generateTts({
+                  ...shared,
+                  ...(body.narration!.languageBoost !== undefined && { languageBoost: body.narration!.languageBoost }),
+                  creds: narration.creds,
+                });
             const { asset } = await ctx.orchestrator.addBufferAsset(
               projectId,
               nar.bytes,
@@ -630,6 +651,80 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       if (url.pathname === '/api/config/minimax' && m === 'DELETE') {
         ctx.mediaConfig.clearMinimax();
         return json(res, 200, ctx.mediaConfig.getMinimaxStatus());
+      }
+
+      if (url.pathname === '/api/config/narration' && m === 'GET') {
+        return json(res, 200, ctx.mediaConfig.getNarrationStatus());
+      }
+      if (url.pathname === '/api/config/narration' && m === 'POST') {
+        const body = (await readBody(req)) as {
+          provider?: 'minimax' | 'bailian';
+          model?: 'MiniMax/speech-02-turbo' | 'MiniMax/speech-02-hd' | 'MiniMax/speech-2.8-turbo' | 'MiniMax/speech-2.8-hd';
+          apiKey?: string;
+          baseUrl?: string;
+        };
+        ctx.mediaConfig.setNarration({
+          provider: body.provider === 'bailian' ? 'bailian' : 'minimax',
+          ...(body.model ? { model: body.model } : {}),
+          ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
+          ...(body.baseUrl !== undefined ? { baseUrl: body.baseUrl } : {}),
+        });
+        return json(res, 200, ctx.mediaConfig.getNarrationStatus());
+      }
+      if (url.pathname === '/api/config/narration' && m === 'DELETE') {
+        ctx.mediaConfig.clearNarration();
+        return json(res, 200, ctx.mediaConfig.getNarrationStatus());
+      }
+
+      if (url.pathname === '/api/config/narration/voices' && m === 'GET') {
+        return json(res, 200, ctx.mediaConfig.listClonedVoices());
+      }
+      if (url.pathname === '/api/config/narration/voices' && m === 'POST') {
+        const body = (await readBody(req)) as {
+          id?: string;
+          name?: string;
+          model?: 'MiniMax/speech-02-turbo' | 'MiniMax/speech-02-hd' | 'MiniMax/speech-2.8-turbo' | 'MiniMax/speech-2.8-hd';
+          audioUrl?: string;
+          previewText?: string;
+        };
+        const creds = ctx.mediaConfig.resolveBailian();
+        if (!creds) return json(res, 400, { error: 'Bailian API key is not configured' });
+        const id = (body.id ?? '').trim();
+        const name = (body.name ?? '').trim() || id;
+        const model = body.model ?? 'MiniMax/speech-2.8-turbo';
+        const result = await cloneBailianMinimaxVoice({
+          voiceId: id,
+          audioUrl: (body.audioUrl ?? '').trim(),
+          previewText: (body.previewText ?? '').trim(),
+          model,
+          creds,
+        });
+        ctx.mediaConfig.addClonedVoice({
+          id: result.voiceId,
+          name,
+          model: result.model,
+          audioUrl: (body.audioUrl ?? '').trim(),
+          createdAt: new Date().toISOString(),
+        });
+        return json(res, 200, {
+          ...ctx.mediaConfig.listClonedVoices(),
+          created: result.voiceId,
+          ...(result.previewBytes
+            ? { previewDataUrl: `data:audio/mpeg;base64,${result.previewBytes.toString('base64')}` }
+            : {}),
+        });
+      }
+      const clonedVoiceMatch = url.pathname.match(/^\/api\/config\/narration\/voices\/([^/]+)$/);
+      if (clonedVoiceMatch?.[1] && m === 'PATCH') {
+        const id = decodeURIComponent(clonedVoiceMatch[1]);
+        const body = (await readBody(req)) as { name?: string; isDefault?: boolean };
+        const voice = ctx.mediaConfig.updateClonedVoice(id, body);
+        return json(res, 200, { voice, ...ctx.mediaConfig.listClonedVoices() });
+      }
+      if (clonedVoiceMatch?.[1] && m === 'DELETE') {
+        const id = decodeURIComponent(clonedVoiceMatch[1]);
+        ctx.mediaConfig.removeClonedVoice(id);
+        return json(res, 200, ctx.mediaConfig.listClonedVoices());
       }
 
       // Agents (detected on each call; cheap thanks to the in-process cache)

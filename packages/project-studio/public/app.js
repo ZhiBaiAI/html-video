@@ -52,6 +52,10 @@ const API = {
   unenhanceFrame: (id, nodeId) => fetch(`/api/projects/${id}/frames/${encodeURIComponent(nodeId)}/unenhance`, { method: 'POST' }).then(r => r.json()),
   testAgent: id => fetch(`/api/agents/${encodeURIComponent(id)}/test`, { method: 'POST' }).then(r => r.json()),
   rescanAgents: () => fetch('/api/agents?force=1').then(r => r.json()),
+  narrationVoices: () => fetch('/api/config/narration/voices').then(r => r.json()),
+  cloneNarrationVoice: b => fetch('/api/config/narration/voices', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(async r => ({ ok: r.ok, status: r.status, data: await r.json() })),
+  updateNarrationVoice: (id, b) => fetch(`/api/config/narration/voices/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json()),
+  removeNarrationVoice: id => fetch(`/api/config/narration/voices/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(r => r.json()),
 };
 
 const state = {
@@ -75,6 +79,8 @@ const state = {
   // Phase C: per-frame native Remotion enhancement
   frameKinds: {},          // { [graphNodeId]: 'entity'|'data'|'text' } for the selected project
   enhancing: null,         // { nodeId, pct, stage } while a single-frame enhance render is in flight
+  narrationVoices: [],
+  defaultNarrationVoiceId: null,
 };
 
 // ============== boot ==============
@@ -86,7 +92,7 @@ async function init() {
     renderToolbar();
     if (state.selected) renderComposer();
   });
-  await Promise.all([refreshTemplates(), refreshProjects()]);
+  await Promise.all([refreshTemplates(), refreshProjects(), refreshNarrationVoices()]);
   renderToolbar();
   wireToolbar();
   wireModals();
@@ -107,6 +113,36 @@ async function init() {
   if (!state.selected && state.projects.length > 0) {
     await selectProject(state.projects[0].id);
   }
+}
+
+async function refreshNarrationVoices() {
+  try {
+    const result = await API.narrationVoices();
+    state.narrationVoices = result.voices || [];
+    state.defaultNarrationVoiceId = result.defaultVoiceId || null;
+  } catch {
+    state.narrationVoices = [];
+    state.defaultNarrationVoiceId = null;
+  }
+}
+
+function narrationVoiceOptions() {
+  const builtIn = NARRATION_VOICES
+    .map((voice) => `<option value="${voice.voiceId}">${t('soundtrack.voice_' + voice.key)}</option>`)
+    .join('');
+  const cloned = state.narrationVoices
+    .map((voice) => `<option value="${esc(voice.id)}" ${voice.id === state.defaultNarrationVoiceId ? 'selected' : ''}>${esc(voice.name)} · ${esc(voice.model.replace('MiniMax/', ''))}</option>`)
+    .join('');
+  return `<optgroup label="${esc(t('soundtrack.builtin_voices'))}">${builtIn}</optgroup>`
+    + (cloned ? `<optgroup label="${esc(t('soundtrack.cloned_voices'))}">${cloned}</optgroup>` : '');
+}
+
+function syncNarrationVoiceSelect() {
+  const select = document.getElementById('st-narration-voice');
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = narrationVoiceOptions();
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
 }
 
 function defaultProjectName(seed) {
@@ -833,8 +869,9 @@ function renderMain() {
                   <div class="st-voice-row">
                     <span class="st-voice-label">${t('soundtrack.voice_label')}</span>
                     <select id="st-narration-voice" class="st-voice-select">
-                      ${NARRATION_VOICES.map((v) => `<option value="${v.voiceId}">${t('soundtrack.voice_' + v.key)}</option>`).join('')}
+                      ${narrationVoiceOptions()}
                     </select>
+                    <input id="st-narration-custom-voice" class="st-voice-select" type="text" placeholder="${t('soundtrack.custom_voice_placeholder')}" />
                     <button type="button" class="st-fit" id="btn-st-fit" title="${t('soundtrack.fit_hint')}">${t('soundtrack.fit_durations')}</button>
                   </div>
                   <div class="st-vol-row"><label>${t('soundtrack.narration_volume')} <input type="range" id="st-narration-vol" min="-20" max="6" value="0" /><b id="st-narration-vol-val">0 dB</b></label></div>
@@ -1104,7 +1141,9 @@ function wireSoundtrackPanel() {
       const nt = stitched || narrationText.value.trim();
       if (!nt) { if (statusEl) statusEl.textContent = t('soundtrack.empty_narration'); return; }
       const voiceSel = document.getElementById('st-narration-voice');
-      payload.narration = { text: nt, volumeDb: Number(narrationVol.value), byFrame: state._narrationByFrame, ...(voiceSel?.value && { voiceId: voiceSel.value }) };
+      const customVoice = document.getElementById('st-narration-custom-voice')?.value.trim();
+      const voiceId = customVoice || voiceSel?.value;
+      payload.narration = { text: nt, volumeDb: Number(narrationVol.value), byFrame: state._narrationByFrame, ...(voiceId && { voiceId }) };
     }
 
     const label = btn?.textContent;
@@ -2978,10 +3017,26 @@ async function renderSettingsAudio(panel) {
     <div class="audio-config" id="audio-config">
       <div class="audio-status" id="audio-status">${esc(t('settings.audio.loading'))}</div>
       <label class="audio-field">
+        <span>${esc(t('settings.audio.provider'))}</span>
+        <select id="narration-provider">
+          <option value="minimax">${esc(t('settings.audio.provider_minimax'))}</option>
+          <option value="bailian">${esc(t('settings.audio.provider_bailian'))}</option>
+        </select>
+      </label>
+      <label class="audio-field" id="bailian-model-field">
+        <span>${esc(t('settings.audio.model'))}</span>
+        <select id="bailian-model">
+          <option value="MiniMax/speech-02-turbo">MiniMax/speech-02-turbo</option>
+          <option value="MiniMax/speech-02-hd">MiniMax/speech-02-hd</option>
+          <option value="MiniMax/speech-2.8-turbo">MiniMax/speech-2.8-turbo</option>
+          <option value="MiniMax/speech-2.8-hd">MiniMax/speech-2.8-hd</option>
+        </select>
+      </label>
+      <label class="audio-field">
         <span>${esc(t('settings.audio.api_key'))}</span>
         <input type="password" id="mm-api-key" placeholder="${esc(t('settings.audio.api_key_placeholder'))}" autocomplete="off" />
       </label>
-      <label class="audio-field">
+      <label class="audio-field" id="minimax-region-field">
         <span>${esc(t('settings.audio.region'))}</span>
         <div class="audio-region" id="mm-region">
           <button type="button" class="st-preset" data-url="https://api.minimax.io/v1">${esc(t('settings.audio.region_intl'))}</button>
@@ -2998,17 +3053,71 @@ async function renderSettingsAudio(panel) {
         <span class="audio-save-state" id="mm-save-state"></span>
       </div>
       <p class="panel-sub" style="font-size:11.5px;margin-top:4px">${esc(t('settings.audio.hint'))}</p>
+      <section class="voice-clone-settings" id="voice-clone-settings">
+        <h4>${esc(t('settings.audio.clone_title'))}</h4>
+        <p class="panel-sub">${esc(t('settings.audio.clone_subtitle'))}</p>
+        <div class="voice-clone-grid">
+          <label class="audio-field">
+            <span>${esc(t('settings.audio.clone_name'))}</span>
+            <input type="text" id="clone-voice-name" placeholder="${esc(t('settings.audio.clone_name_placeholder'))}" />
+          </label>
+          <label class="audio-field">
+            <span>${esc(t('settings.audio.clone_id'))}</span>
+            <input type="text" id="clone-voice-id" placeholder="my-narrator" />
+          </label>
+          <label class="audio-field voice-clone-wide">
+            <span>${esc(t('settings.audio.clone_audio_url'))}</span>
+            <input type="url" id="clone-audio-url" placeholder="https://example.com/voice.wav" />
+          </label>
+          <label class="audio-field voice-clone-wide">
+            <span>${esc(t('settings.audio.clone_preview_text'))}</span>
+            <input type="text" id="clone-preview-text" value="${esc(t('settings.audio.clone_preview_default'))}" />
+          </label>
+        </div>
+        <div class="audio-actions">
+          <button class="audio-save primary-action" id="clone-voice-create">${esc(t('settings.audio.clone_create'))}</button>
+          <span class="audio-save-state" id="clone-voice-state"></span>
+        </div>
+        <div id="clone-preview"></div>
+        <h4>${esc(t('settings.audio.voice_library'))}</h4>
+        <div class="voice-library" id="voice-library"></div>
+        <p class="panel-sub voice-library-note">${esc(t('settings.audio.voice_library_note'))}</p>
+      </section>
     </div>
   `;
 
   const statusEl = panel.querySelector('#audio-status');
   const keyInput = panel.querySelector('#mm-api-key');
   const baseInput = panel.querySelector('#mm-base-url');
+  const providerInput = panel.querySelector('#narration-provider');
+  const modelInput = panel.querySelector('#bailian-model');
+  const regionField = panel.querySelector('#minimax-region-field');
+  const modelField = panel.querySelector('#bailian-model-field');
+  const cloneSection = panel.querySelector('#voice-clone-settings');
   const saveState = panel.querySelector('#mm-save-state');
+
+  const syncProviderFields = (resetBase = false) => {
+    const bailian = providerInput.value === 'bailian';
+    regionField.style.display = bailian ? 'none' : '';
+    modelField.style.display = bailian ? '' : 'none';
+    cloneSection.style.display = bailian ? '' : 'none';
+    const defaultBaseUrl = bailian
+      ? 'https://dashscope.aliyuncs.com/api/v1'
+      : 'https://api.minimax.io/v1';
+    baseInput.placeholder = defaultBaseUrl;
+    if (resetBase) baseInput.value = defaultBaseUrl;
+    keyInput.placeholder = bailian
+      ? t('settings.audio.bailian_key_placeholder')
+      : t('settings.audio.api_key_placeholder');
+  };
+  providerInput.onchange = () => syncProviderFields(true);
 
   const refresh = async () => {
     try {
-      const s = await fetch('/api/config/minimax').then((r) => r.json());
+      const s = await fetch('/api/config/narration').then((r) => r.json());
+      providerInput.value = s.provider || 'minimax';
+      modelInput.value = s.model || 'MiniMax/speech-02-turbo';
+      syncProviderFields(false);
       if (s.configured) {
         const src = s.source === 'env' ? t('settings.audio.source_env') : t('settings.audio.source_config');
         statusEl.innerHTML = `<span class="agent-status-dot ok"></span>${esc(t('settings.audio.configured', { key: s.maskedKey, source: src }))}`;
@@ -3021,6 +3130,96 @@ async function renderSettingsAudio(panel) {
     }
   };
   await refresh();
+
+  const applyVoiceResult = (result) => {
+    state.narrationVoices = result.voices || [];
+    state.defaultNarrationVoiceId = result.defaultVoiceId || null;
+    syncNarrationVoiceSelect();
+  };
+
+  const renderVoiceLibrary = () => {
+    const list = panel.querySelector('#voice-library');
+    if (!state.narrationVoices.length) {
+      list.innerHTML = `<div class="voice-library-empty">${esc(t('settings.audio.voice_library_empty'))}</div>`;
+      return;
+    }
+    list.innerHTML = state.narrationVoices.map((voice) => `
+      <div class="voice-library-item" data-voice-id="${esc(voice.id)}">
+        <div class="voice-library-main">
+          <input class="voice-library-name" value="${esc(voice.name)}" aria-label="${esc(t('settings.audio.clone_name'))}" />
+          <code>${esc(voice.id)}</code>
+          <span>${esc(voice.model.replace('MiniMax/', ''))}</span>
+        </div>
+        <div class="voice-library-actions">
+          ${voice.id === state.defaultNarrationVoiceId ? `<b>${esc(t('settings.audio.voice_default'))}</b>` : `<button data-action="default">${esc(t('settings.audio.voice_set_default'))}</button>`}
+          <button data-action="rename">${esc(t('settings.audio.voice_rename'))}</button>
+          <button data-action="remove" class="danger">${esc(t('settings.audio.voice_remove'))}</button>
+        </div>
+      </div>`).join('');
+
+    list.querySelectorAll('.voice-library-item').forEach((item) => {
+      const id = item.dataset.voiceId;
+      item.querySelectorAll('button').forEach((button) => {
+        button.onclick = async () => {
+          button.disabled = true;
+          try {
+            let result;
+            if (button.dataset.action === 'remove') {
+              result = await API.removeNarrationVoice(id);
+            } else {
+              const name = item.querySelector('.voice-library-name').value.trim();
+              result = await API.updateNarrationVoice(id, {
+                ...(button.dataset.action === 'rename' ? { name } : {}),
+                ...(button.dataset.action === 'default' ? { isDefault: true } : {}),
+              });
+            }
+            applyVoiceResult(result);
+            renderVoiceLibrary();
+          } catch (error) {
+            toast(t('settings.audio.voice_action_failed', { message: error?.message ?? error }), 'error');
+          } finally {
+            button.disabled = false;
+          }
+        };
+      });
+    });
+  };
+  renderVoiceLibrary();
+
+  panel.querySelector('#clone-voice-create').onclick = async () => {
+    const button = panel.querySelector('#clone-voice-create');
+    const status = panel.querySelector('#clone-voice-state');
+    const body = {
+      name: panel.querySelector('#clone-voice-name').value.trim(),
+      id: panel.querySelector('#clone-voice-id').value.trim(),
+      audioUrl: panel.querySelector('#clone-audio-url').value.trim(),
+      previewText: panel.querySelector('#clone-preview-text').value.trim(),
+      model: modelInput.value,
+    };
+    if (!body.id || !body.audioUrl || !body.previewText) {
+      status.textContent = t('settings.audio.clone_required');
+      return;
+    }
+    button.disabled = true;
+    status.textContent = t('settings.audio.clone_creating');
+    try {
+      const response = await API.cloneNarrationVoice(body);
+      if (!response.ok) throw new Error(response.data.error || `HTTP ${response.status}`);
+      applyVoiceResult(response.data);
+      renderVoiceLibrary();
+      status.textContent = t('settings.audio.clone_created');
+      const preview = panel.querySelector('#clone-preview');
+      preview.innerHTML = response.data.previewDataUrl
+        ? `<audio controls src="${response.data.previewDataUrl}"></audio>`
+        : '';
+      panel.querySelector('#clone-voice-name').value = '';
+      panel.querySelector('#clone-voice-id').value = '';
+    } catch (error) {
+      status.textContent = t('settings.audio.clone_failed', { message: error?.message ?? error });
+    } finally {
+      button.disabled = false;
+    }
+  };
 
   // Region quick-pick: fills the Base URL with the correct regional endpoint.
   // MiniMax keys are region-bound (an api.minimax.io key won't auth against
@@ -3038,10 +3237,15 @@ async function renderSettingsAudio(panel) {
     if (!apiKey) { saveState.textContent = t('settings.audio.need_key'); return; }
     saveState.textContent = t('settings.audio.saving');
     try {
-      const r = await fetch('/api/config/minimax', {
+      const r = await fetch('/api/config/narration', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ apiKey, baseUrl: baseInput.value.trim() }),
+        body: JSON.stringify({
+          provider: providerInput.value,
+          model: modelInput.value,
+          apiKey,
+          baseUrl: baseInput.value.trim(),
+        }),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       keyInput.value = '';
@@ -3053,7 +3257,7 @@ async function renderSettingsAudio(panel) {
   };
 
   panel.querySelector('#mm-clear').onclick = async () => {
-    await fetch('/api/config/minimax', { method: 'DELETE' });
+    await fetch('/api/config/narration', { method: 'DELETE' });
     keyInput.value = '';
     baseInput.value = '';
     saveState.textContent = '';
