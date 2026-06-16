@@ -18,6 +18,8 @@ besides being placed under our directory layout) of
 - `frame-play-mode` ← examples/play-mode
 - `frame-product-promo` ← examples/product-promo
 - `frame-vignelli` ← examples/vignelli
+- `frame-motion-blur` ← examples/motion-blur
+- `frame-vscode-theme-visualizer` ← examples/vscode-theme-visualizer
 
 Per the Apache-2.0 license:
 - Copyright © Hyperframes / heygen-com.
@@ -25,6 +27,33 @@ Per the Apache-2.0 license:
   the repo root and this NOTICE.md acknowledging the source.
 - Each template's `template.html-video.yaml` records the upstream URL
   in `assets_attribution`.
+
+## Apache-2.0 — Hyperframes `/design` premade frame showcases
+
+The following templates are imported from the public Hyperframes FRAME.MD
+premade frame showcase at [hyperframes.dev/design](https://www.hyperframes.dev/design).
+Each template preserves the upstream `frame-showcase.html` as its live preview
+entry and records the source URL in `template.html-video.yaml`.
+
+- `frame-design-biennale-yellow` ← design-templates/biennale-yellow
+- `frame-design-blockframe` ← design-templates/blockframe
+- `frame-design-blue-professional` ← design-templates/blue-professional
+- `frame-design-bold-poster` ← design-templates/bold-poster
+- `frame-design-broadside` ← design-templates/broadside
+- `frame-design-capsule` ← design-templates/capsule
+- `frame-design-cartesian` ← design-templates/cartesian
+- `frame-design-cobalt-grid` ← design-templates/cobalt-grid
+- `frame-design-coral` ← design-templates/coral
+- `frame-design-creative-mode` ← design-templates/creative-mode
+- `frame-design-daisy-days` ← design-templates/daisy-days
+- `frame-design-editorial-forest` ← design-templates/editorial-forest
+
+Per the Apache-2.0 license:
+- Copyright © Hyperframes / heygen-com.
+- Redistributed as selectable html-video templates with Chinese display
+  metadata and poster fallback.
+- These are FRAME.MD design-system showcases: use them as visual direction
+  templates rather than fixed content scripts.
 
 ## MIT — `nateherkai/hyperframes-student-kit`
 

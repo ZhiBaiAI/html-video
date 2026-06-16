@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="雏菊晴天 Daisy Days poster">
+  <rect width="1600" height="900" fill="#fff4b8"/>
+  <circle cx="1260" cy="190" r="150" fill="#f7cb46" stroke="#263238" stroke-width="10"/>
+  <circle cx="265" cy="685" r="190" fill="#c0f7fe" stroke="#263238" stroke-width="10"/>
+  <rect x="150" y="135" width="1000" height="440" rx="44" fill="#fffdf5" stroke="#263238" stroke-width="10"/>
+  <text x="220" y="320" font-family="Arial, sans-serif" font-size="108" font-weight="900" fill="#263238">雏菊晴天</text>
+  <text x="224" y="432" font-family="Arial, sans-serif" font-size="76" font-weight="800" fill="#263238">Daisy Days</text>
+  <text x="224" y="525" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#263238">Sunny garden pastels · hard offset shadows</text>
+  <g fill="#fe90e8" stroke="#263238" stroke-width="8">
+    <circle cx="1200" cy="655" r="46"/>
+    <circle cx="1300" cy="655" r="46"/>
+    <circle cx="1250" cy="605" r="46"/>
+    <circle cx="1250" cy="705" r="46"/>
+  </g>
+  <circle cx="1250" cy="655" r="36" fill="#f7cb46" stroke="#263238" stroke-width="8"/>
+</svg>

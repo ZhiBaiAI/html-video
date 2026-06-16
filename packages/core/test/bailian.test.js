@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { cloneBailianMinimaxVoice, generateBailianTts } from '../dist/bailian.js';
+import { cloneBailianCosyVoice, generateBailianTts } from '../dist/bailian.js';
 
-test('generateBailianTts sends MiniMax model and cloned voice id', async (t) => {
+test('generateBailianTts sends CosyVoice model, voice, and controls', async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
 
+  let requestUrl;
   let requestBody;
-  globalThis.fetch = async (_url, init) => {
+  globalThis.fetch = async (url, init) => {
+    requestUrl = String(url);
     requestBody = JSON.parse(init.body);
     return new Response(JSON.stringify({
       output: { audio: { data: Buffer.from('fake-mp3').toString('base64') } },
@@ -20,12 +22,22 @@ test('generateBailianTts sends MiniMax model and cloned voice id', async (t) => 
   const result = await generateBailianTts({
     text: '测试旁白',
     voiceId: 'my-cloned-voice',
-    model: 'MiniMax/speech-2.8-turbo',
+    model: 'cosyvoice-v3-flash',
+    rate: 1.2,
+    volume: 68,
+    emotion: 'happy',
+    scene: '新闻播报',
     creds: { apiKey: 'test-key', baseUrl: 'https://dashscope.aliyuncs.com/api/v1' },
   });
 
-  assert.equal(requestBody.model, 'MiniMax/speech-2.8-turbo');
-  assert.equal(requestBody.input.voice_setting.voice_id, 'my-cloned-voice');
+  assert.equal(requestUrl, 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer');
+  assert.equal(requestBody.model, 'cosyvoice-v3-flash');
+  assert.equal(requestBody.input.voice, 'my-cloned-voice');
+  assert.equal(requestBody.input.format, 'mp3');
+  assert.equal(requestBody.input.sample_rate, 24000);
+  assert.equal(requestBody.input.rate, 1.2);
+  assert.equal(requestBody.input.volume, 68);
+  assert.equal(requestBody.input.instruction, '你正在进行新闻播报，你说话的情感是happy。');
   assert.equal(result.bytes.toString(), 'fake-mp3');
   assert.equal(result.ext, '.mp3');
 });
@@ -48,31 +60,38 @@ test('generateBailianTts accepts output.audio as a base64 string', async (t) => 
   assert.equal(result.bytes.toString(), 'direct-audio');
 });
 
-test('cloneBailianMinimaxVoice sends the public audio URL and chosen voice id', async (t) => {
+test('cloneBailianCosyVoice sends the public audio URL and chosen voice prefix', async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
   });
 
+  let requestUrl;
   let requestBody;
-  globalThis.fetch = async (_url, init) => {
+  globalThis.fetch = async (url, init) => {
+    requestUrl = String(url);
     requestBody = JSON.parse(init.body);
     return new Response(JSON.stringify({
-      output: { audio: Buffer.from('clone-preview').toString('base64') },
+      output: { voice_id: 'cosyvoice-v3-flash-joeyvoice-abc123' },
+      request_id: 'req-123',
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 
-  const result = await cloneBailianMinimaxVoice({
-    voiceId: 'joey-narrator',
+  const result = await cloneBailianCosyVoice({
+    prefix: 'joeyvoice',
     audioUrl: 'https://example.com/voice.wav',
-    previewText: '这是一段试听文本。',
-    model: 'MiniMax/speech-2.8-turbo',
+    model: 'cosyvoice-v3-flash',
+    languageHints: ['zh'],
     creds: { apiKey: 'test-key', baseUrl: 'https://dashscope.aliyuncs.com/api/v1' },
   });
 
-  assert.equal(requestBody.input.action, 'voice_clone');
-  assert.equal(requestBody.input.voice_id, 'joey-narrator');
-  assert.equal(requestBody.input.audio_url, 'https://example.com/voice.wav');
-  assert.equal(result.voiceId, 'joey-narrator');
-  assert.equal(result.previewBytes.toString(), 'clone-preview');
+  assert.equal(requestUrl, 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/customization');
+  assert.equal(requestBody.model, 'voice-enrollment');
+  assert.equal(requestBody.input.action, 'create_voice');
+  assert.equal(requestBody.input.target_model, 'cosyvoice-v3-flash');
+  assert.equal(requestBody.input.prefix, 'joeyvoice');
+  assert.equal(requestBody.input.url, 'https://example.com/voice.wav');
+  assert.deepEqual(requestBody.input.language_hints, ['zh']);
+  assert.equal(result.voiceId, 'cosyvoice-v3-flash-joeyvoice-abc123');
+  assert.equal(result.requestId, 'req-123');
 });

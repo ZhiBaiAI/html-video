@@ -13,10 +13,10 @@ import { tmpdir } from 'node:os';
 import type { CliContext } from './context.js';
 import {
   AssetStore,
-  cloneBailianMinimaxVoice,
+  cloneBailianCosyVoice,
   generateBailianTts,
   generateTts,
-  generateMusic,
+  probeMediaDurationSec,
 } from '@html-video/core';
 import { extractUrls, fetchSource } from './fetch-source.js';
 import { detectAll, findAgent, spawnAgent } from '@html-video/runtime';
@@ -37,10 +37,22 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.json': 'application/json; charset=utf-8',
   '.webp': 'image/webp',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.mpga': 'audio/mpeg',
   '.mp4': 'video/mp4',
   '.webm': 'video/webm',
   '.txt': 'text/plain; charset=utf-8',
 };
+
+const DEFAULT_COSYVOICE_SAMPLE_URL = [
+  'https://bailian-bmp-prod.oss-cn-beijing.aliyuncs.com/model_offline_result/11751412/1781175777482/qianwen/recording_1781175775568.wav',
+  '?Expires=1781182978',
+  '&OSSAccessKeyId=STS.NZ1WVUaukZeMxYoE4jg34Rd3J',
+  '&Signature=k9V3dbCdhTD4RTpuwARFC1WGnNQ%3D',
+  '&security-token=CAIS2AJ1q6Ft5B2yfSjIr5mEHOzhjKpK7aemen%2FeoTQ%2Fa7wYvaGYqDz2IHhMenRoAu8fv%2FU1nmlQ6%2FsZlrp6SJtIXleCZtF94oxN9h2gb4fb4y1LA2qH08%2FLI3OaLjKm9u2wCryLYbGwU%2FOpbE%2B%2B5U0X6LDmdDKkckW4OJmS8%2FBOZcgWWQ%2FKBlgvRq0hRG1YpdQdKGHaONu0LxfumRCwNkdzvRdmgm4NgsbWgO%2Fks0CD0w2rlLFL%2BdugcsT4MvMBZskvD42Hu8VtbbfE3SJq7BxHybx7lqQs%2B02c5onDXgEKvEzXYrCOq4UycVRjE6IgHKdIt%2FP7jfA9sOHVnITywgxOePlRWjjRQ5ql0E4ehBQP3yBTn9%2FVTJeturjnXvGd24ikVa0RnwBBMhytfsq8tbjo7uXGa%2FbB1hmjSUyYUMumi%2BluDkYtlgzV9eKArlL3Sa2Rv07lcjH7NCtAXxqAAT6Yetg3RRB6Z%2BsfiRqjNnfHABdKlyh38F%2Fvw2aRvgJxA2efFAA5N6MvQY2g6juFRm3amck7ITMezlp1SMVRAhGORlhklC03RCVGB8zcadmvQ0pvS0id0%2BoND0X92QVgN7DPUk98f5uO0TJP9d28fxW8by6sZn8s4%2FFcDtO2o%2BVSIAA%3D',
+].join('');
 
 function resolveUiRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -125,7 +137,10 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             return {
               id: t.id,
               name: t.name,
+              name_zh: t.name_zh,
               description: t.description,
+              description_zh: t.description_zh,
+              description_en: t.description_en,
               engine: t.engine,
               source_entry: t.source_entry,
               category: t.category,
@@ -184,6 +199,84 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       if (rmAssetMatch && rmAssetMatch[1] && rmAssetMatch[2] && m === 'DELETE') {
         const project = await ctx.orchestrator.removeAsset(rmAssetMatch[1], rmAssetMatch[2]);
         return json(res, 200, { project });
+      }
+
+      // Talking-head source video: upload or bind an existing video asset.
+      // When original-audio mode is enabled, export overlays the source video
+      // bottom-right and uses its audio as the final audio track.
+      const thMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/talking-head$/);
+      if (thMatch && thMatch[1] && m === 'POST') {
+        const projectId = thMatch[1];
+        const ct = req.headers['content-type'] ?? '';
+        try {
+          let videoAssetId = '';
+          if (ct.startsWith('multipart/form-data')) {
+            const saved = await receiveMultipartFile(req, ct);
+            if (AssetStore.guessMime(saved.filePath).type !== 'video') {
+              return json(res, 400, { error: 'Upload a video file for talking-head mode.' });
+            }
+            const project = await ctx.orchestrator.addFileAsset(projectId, saved.filePath, 'talking-head source');
+            const asset = project.assets[project.assets.length - 1];
+            if (!asset || asset.type !== 'video') return json(res, 400, { error: 'Upload a video file for talking-head mode.' });
+            videoAssetId = asset.id;
+          } else {
+            const body = await readBody(req);
+            videoAssetId = String(body.videoAssetId ?? '');
+          }
+          if (!videoAssetId) return json(res, 400, { error: 'videoAssetId or video upload required' });
+          const project = await ctx.orchestrator.setTalkingHead(projectId, videoAssetId, { audioMode: 'synthetic' });
+          return json(res, 200, { project });
+        } catch (err) {
+          return json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      if (thMatch && thMatch[1] && m === 'PATCH') {
+        try {
+          const body = (await readBody(req).catch(() => ({}))) as { audioMode?: string };
+          if (body.audioMode !== 'synthetic' && body.audioMode !== 'original') {
+            return json(res, 400, { error: 'audioMode must be synthetic or original' });
+          }
+          const project = await ctx.orchestrator.setTalkingHeadAudioMode(thMatch[1], body.audioMode);
+          return json(res, 200, { project });
+        } catch (err) {
+          return json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      if (thMatch && thMatch[1] && m === 'DELETE') {
+        const project = await ctx.orchestrator.clearTalkingHead(thMatch[1]);
+        return json(res, 200, { project });
+      }
+
+      const thTranscribeMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/talking-head\/transcribe$/);
+      if (thTranscribeMatch && thTranscribeMatch[1] && m === 'POST') {
+        const projectId = thTranscribeMatch[1];
+        try {
+          const body = (await readBody(req).catch(() => ({}))) as {
+            videoAssetId?: string;
+            model?: string;
+            language?: string;
+          };
+          const project = await ctx.orchestrator.load(projectId);
+          const videoAssetId = body.videoAssetId || project.talkingHead?.videoAssetId;
+          if (!videoAssetId) return json(res, 400, { error: 'No talking-head video selected.' });
+          const out = await ctx.orchestrator.transcribeTalkingHead({
+            projectId,
+            videoAssetId,
+            model: body.model || 'tiny',
+            ...(body.language ? { language: body.language } : {}),
+          });
+          return json(res, 200, {
+            project: out.project,
+            transcript: out.transcript,
+            transcript_path: out.transcriptPath,
+            srt_path: out.srtPath,
+            vtt_path: out.vttPath,
+          });
+        } catch (err) {
+          return json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+        }
       }
 
       // Set template
@@ -414,19 +507,26 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return;
       }
 
-      // Generate soundtrack: background music (MiniMax music_generation) and/or
-      // narration (MiniMax t2a_v2). Streams SSE progress like export. The
-      // generated MP3s are stored as project assets; their ids land in
-      // project.soundtrack so exportMp4 mixes them in. Generation itself does
+      // Generate synthesized narration. Streams SSE progress like export. The
+      // generated MP3 is stored as a project asset; its id lands in
+      // project.soundtrack so exportMp4 mixes it in. Generation itself does
       // NOT need ffmpeg — only the export-time mux does.
       const genAudioMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/generate-audio$/);
       if (genAudioMatch && genAudioMatch[1] && m === 'POST') {
         const projectId = genAudioMatch[1];
         const body = (await readBody(req)) as {
           music?: { prompt?: string; instrumental?: boolean; volumeDb?: number };
-          narration?: { text?: string; voiceId?: string; volumeDb?: number; languageBoost?: string; byFrame?: Record<string, string> };
-          fadeInSec?: number;
-          fadeOutSec?: number;
+          narration?: {
+            text?: string;
+            voiceId?: string;
+            volumeDb?: number;
+            languageBoost?: string;
+            byFrame?: Record<string, string>;
+            emotion?: string;
+            scene?: string;
+            rate?: number;
+            volume?: number;
+          };
         };
         res.writeHead(200, {
           'content-type': 'text/event-stream; charset=utf-8',
@@ -439,45 +539,26 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         };
         try {
           sse({ type: 'audio_started' });
-          const creds = ctx.mediaConfig.resolveMinimax();
-          if (body.music?.prompt?.trim() && !creds) {
-            sse({
-              type: 'audio_failed',
-              message:
-                'MiniMax API key not configured — add it in Settings → Audio (or set OD_MINIMAX_API_KEY).',
-            });
+          if (body.music?.prompt?.trim()) {
+            sse({ type: 'audio_failed', message: 'Background music generation is disabled.' });
             res.end();
             return;
           }
 
           const project = await ctx.orchestrator.load(projectId);
           const soundtrack = { ...(project.soundtrack ?? {}) };
-          const wantMusic = !!body.music?.prompt?.trim();
           const wantNarration = !!body.narration?.text?.trim();
-          if (!wantMusic && !wantNarration) {
-            sse({ type: 'audio_failed', message: 'Nothing to generate — provide a music prompt and/or narration text.' });
+          if (!wantNarration) {
+            sse({ type: 'audio_failed', message: 'Nothing to generate — provide narration text.' });
             res.end();
             return;
           }
 
-          if (wantMusic) {
-            sse({ type: 'audio_progress', stage: 'music', message: 'generating background music…' });
-            const music = await generateMusic({
-              prompt: body.music!.prompt!.trim(),
-              instrumental: body.music!.instrumental ?? true,
-              creds: creds!,
-            });
-            const { asset } = await ctx.orchestrator.addBufferAsset(
-              projectId,
-              music.bytes,
-              music.ext,
-              `background music · ${body.music!.prompt!.trim().slice(0, 60)}`,
-            );
-            soundtrack.musicAssetId = asset.id;
-            soundtrack.musicPrompt = body.music!.prompt!.trim();
-            if (body.music!.volumeDb !== undefined) soundtrack.musicVolumeDb = body.music!.volumeDb;
-            sse({ type: 'audio_progress', stage: 'music', message: music.providerNote, asset_id: asset.id });
-          }
+          delete soundtrack.musicAssetId;
+          delete soundtrack.musicPrompt;
+          delete soundtrack.musicVolumeDb;
+          delete soundtrack.fadeInSec;
+          delete soundtrack.fadeOutSec;
 
           if (wantNarration) {
             sse({ type: 'audio_progress', stage: 'narration', message: 'generating narration…' });
@@ -495,6 +576,10 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
                   model: body.narration!.voiceId
                     ? (ctx.mediaConfig.getClonedVoice(body.narration!.voiceId)?.model ?? narration.model)
                     : narration.model,
+                  ...(body.narration!.emotion !== undefined && { emotion: body.narration!.emotion }),
+                  ...(body.narration!.scene !== undefined && { scene: body.narration!.scene }),
+                  ...(body.narration!.rate !== undefined && { rate: body.narration!.rate }),
+                  ...(body.narration!.volume !== undefined && { volume: body.narration!.volume }),
                   creds: narration.creds,
                 })
               : await generateTts({
@@ -515,19 +600,266 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             sse({ type: 'audio_progress', stage: 'narration', message: nar.providerNote, asset_id: asset.id });
           }
 
-          if (body.fadeInSec !== undefined) soundtrack.fadeInSec = body.fadeInSec;
-          if (body.fadeOutSec !== undefined) soundtrack.fadeOutSec = body.fadeOutSec;
-
           // Persist soundtrack onto the project (reload to avoid clobbering the
           // asset pushes addBufferAsset already saved).
           const fresh = await ctx.orchestrator.load(projectId);
           fresh.soundtrack = soundtrack;
+          if (wantNarration && fresh.talkingHead?.enabled) {
+            fresh.talkingHead.audioMode = 'synthetic';
+          }
           await ctx.projects.save(fresh);
           sse({ type: 'audio_done', project: fresh, soundtrack });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           process.stderr.write(`[studio:generate-audio] proj=${projectId} failed: ${msg}\n`);
           sse({ type: 'audio_failed', message: msg });
+        }
+        res.end();
+        return;
+      }
+
+      // ============== One-click narrate-to-video orchestration ==============
+      // Turns a spoken-voiceover script (or a topic the agent expands into one)
+      // into a finished narrated MP4 in a single SSE-streaming call:
+      //   script/topic → split into N segments → content-graph (N text frames)
+      //   → per-frame HTML via the agent → TTS narration → fit frame durations
+      //   to the REAL audio length (ffprobe) → export MP4 (auto-muxes audio).
+      // Reuses the same building blocks as the manual Storyboard → Narration
+      // panel, just chains them so the user types a script and clicks once.
+      const narrateMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/narrate$/);
+      if (narrateMatch && narrateMatch[1] && m === 'POST') {
+        const projectId = narrateMatch[1];
+        const body = (await readBody(req)) as {
+          script?: string;
+          topic?: string;        // when script is omitted, agent expands this into a script first
+          mode?: 'script' | 'topic';
+          agentId?: string;
+          voiceId?: string;
+          volumeDb?: number;
+          templateId?: string;
+          aspect?: string;
+        };
+        const agentId = body.agentId;
+        if (!agentId) return json(res, 400, { error: 'No agent selected.' });
+        const agentDef = findAgent(agentId);
+        if (!agentDef) return json(res, 400, { error: `agent "${agentId}" not registered` });
+
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+        });
+        const sse = (obj: unknown) => {
+          try { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); }
+          catch { /* client gone — pipeline keeps running, result is persisted */ }
+        };
+        const progress = (stage: string, messageKey: string) => sse({ type: 'narrate_progress', stage, message_key: messageKey });
+
+        try {
+          const projectDir = await ctx.projects.ensureDir(projectId);
+
+          // ---- Step 1: obtain the spoken script + split into segments ----
+          let script = (body.script ?? '').trim();
+          const isTopicMode = (body.mode === 'topic') || (!script && !!body.topic?.trim());
+          if (isTopicMode) {
+            const topic = (body.topic ?? script ?? '').trim();
+            if (!topic) throw new Error('Nothing to narrate — provide a script or a topic.');
+            progress('script', 'narrate.progress.script');
+            const expandPrompt = [
+              `Write a short spoken voiceover script (~60-120 words) for a video about: "${topic}".`,
+              `Output ONLY the spoken script as plain text — no headings, no markdown, no numbering.`,
+              `Write it in the same language as the topic.`,
+              `Make it natural to read aloud, with clear sentence boundaries.`,
+            ].join('\n');
+            script = (await callAgentSimple(agentDef, expandPrompt, projectDir)).trim();
+            if (!script) throw new Error('Agent returned an empty script.');
+            sse({ type: 'narrate_script', script });
+          }
+          if (!script) throw new Error('Nothing to narrate — provide a script.');
+
+          // Split the script into per-frame segments (one sentence-group each).
+          // Ask the agent for a JSON array so splits are semantic, not just on
+          // punctuation. Hard-cap to 2-6 frames (enough to storyboard, not so
+          // many that each frame is a single word).
+          progress('split', 'narrate.progress.split');
+          const targetFrames = Math.min(6, Math.max(2, Math.ceil(script.length / 40)));
+          const splitPrompt = [
+            `Split this voiceover script into ${targetFrames} segments, one per video frame, IN ORDER.`,
+            `Keep the wording UNCHANGED — only choose where to cut.`,
+            `Script:`,
+            script,
+            ``,
+            `Output ONLY a JSON array of ${targetFrames} strings, each one a contiguous chunk of the script (in order, concatenated they must equal the whole script). No prose, no numbering.`,
+          ].join('\n');
+          let segments: string[] = [];
+          const splitRaw = (await callAgentSimple(agentDef, splitPrompt, projectDir)).trim();
+          const jsonMatch = /\[[\s\S]*\]/.exec(splitRaw);
+          if (jsonMatch) {
+            try { segments = JSON.parse(jsonMatch[0]).map((s: unknown) => String(s).trim()).filter(Boolean); }
+            catch { /* fall back below */ }
+          }
+          if (segments.length < 2) {
+            // Deterministic fallback: split on sentence punctuation, clamp to targetFrames.
+            const sentences = script.split(/(?<=[。！？!?\.])\s*/).map((s) => s.trim()).filter(Boolean);
+            if (sentences.length <= targetFrames) {
+              segments = sentences.length ? sentences : [script];
+            } else {
+              segments = [];
+              const per = Math.ceil(sentences.length / targetFrames);
+              for (let i = 0; i < sentences.length; i += per) {
+                segments.push(sentences.slice(i, i + per).join(' '));
+              }
+            }
+          }
+          // Merged script = authoritative narration text (in case the agent trimmed).
+          const fullNarrationText = segments.join(' ').replace(/\s+/g, ' ').trim() || script.trim();
+
+          // ---- Step 2: build the content-graph deterministically ----
+          // Each segment → one text-node frame. Duration is provisional; the
+          // real values come from the audio probe in step 5.
+          const aspect = body.aspect ?? '16:9';
+          const graph: import('@html-video/content-graph').ContentGraph = {
+            schemaVersion: 1,
+            intent: 'explainer',
+            synopsis: fullNarrationText.slice(0, 80),
+            nodes: segments.map((seg, i) => {
+              const id = `frame_${i + 1}`;
+              // First sentence of the segment is the on-screen headline.
+              const headline = seg.split(/(?<=[。！？!?\.])\s*/)[0]?.trim() || seg.slice(0, 40);
+              return {
+                id,
+                kind: 'text' as const,
+                label: headline.slice(0, 60),
+                durationSec: 3,
+                text: seg,
+              };
+            }),
+            edges: [],
+          };
+          await ctx.orchestrator.writeContentGraph(projectId, graph, { preserveFrames: false });
+          // Set resolution so export records at the right aspect.
+          {
+            let res = '1920×1080';
+            if (aspect === '9:16') res = '1080×1920';
+            else if (aspect === '1:1') res = '1080×1080';
+            const [w, h] = res.split('×').map(Number);
+            const proj = await ctx.projects.load(projectId);
+            proj.preferences = { ...proj.preferences, ...(w && h ? { resolution: { width: w, height: h } } : {}) };
+            if (body.templateId) proj.templateId = body.templateId;
+            await ctx.projects.save(proj);
+          }
+          sse({ type: 'narrate_graph', frame_count: graph.nodes.length });
+
+          // ---- Step 3: per-frame HTML (reuse the storyboard frame prompt) ----
+          progress('frames', 'narrate.progress.frames');
+          const pickedStyle = body.templateId
+            ? (() => {
+                const tmpl = ctx.templates.list().find((t) => t.id === body.templateId);
+                return tmpl ? `(use template "${tmpl.name}" — ${tmpl.description})` : '';
+              })()
+            : '';
+          for (let i = 0; i < graph.nodes.length; i++) {
+            const node = graph.nodes[i]!;
+            const seg = segments[i]!;
+            const headline = node.label ?? seg.slice(0, 40);
+            const fp = [
+              `Output ONE complete HTML video frame in a fenced \`\`\`html block. No prose outside the block.`,
+              `This is frame ${i + 1} of ${graph.nodes.length} of a narrated video.`,
+              `On-screen headline: "${headline}"`,
+              `Context (the spoken line for this frame): "${seg.slice(0, 160)}"`,
+              `Aspect: ${aspect}. Inline CSS only, opens with a subtle entrance animation, tag text with data-hv-text.`,
+              pickedStyle ? `Style: ${pickedStyle}` : `Style: tasteful default, high contrast, readable.`,
+              `Begin your reply with \`\`\`html.`,
+            ].join('\n');
+            const frameText = await callAgentSimple(agentDef, fp, projectDir);
+            const extracted = /```html\s*\n([\s\S]*?)```/i.exec(frameText)?.[1]?.trim()
+              ?? /<!doctype html[\s\S]*?<\/html>/i.exec(frameText)?.[0];
+            if (!extracted) throw new Error(`frame "${node.id}" returned empty HTML.`);
+            await ctx.orchestrator.writeFrameHtml(projectId, node.id, extracted);
+            sse({ type: 'narrate_frame_done', node_id: node.id, order: i, total: graph.nodes.length });
+          }
+
+          // ---- Step 4: synthesize the narration TTS ----
+          progress('audio', 'narrate.progress.audio');
+          const narration = ctx.mediaConfig.resolveNarration();
+          if (!narration) {
+            throw new Error('Narration API key not configured — add it in Settings > Audio.');
+          }
+          const nar = narration.provider === 'bailian'
+            ? await generateBailianTts({
+                text: fullNarrationText,
+                ...(body.voiceId !== undefined && { voiceId: body.voiceId }),
+                model: body.voiceId
+                  ? (ctx.mediaConfig.getClonedVoice(body.voiceId)?.model ?? narration.model)
+                  : narration.model,
+                creds: narration.creds,
+              })
+            : await generateTts({
+                text: fullNarrationText,
+                ...(body.voiceId !== undefined && { voiceId: body.voiceId }),
+                creds: narration.creds,
+              });
+          const { asset: narAsset } = await ctx.orchestrator.addBufferAsset(
+            projectId,
+            nar.bytes,
+            nar.ext,
+            `narration · ${fullNarrationText.slice(0, 60)}`,
+          );
+          const narrationByFrame = Object.fromEntries(graph.nodes.map((n, i) => [n.id, segments[i] ?? '']));
+          const fresh = await ctx.orchestrator.load(projectId);
+          fresh.soundtrack = {
+            ...(fresh.soundtrack ?? {}),
+            narrationAssetId: narAsset.id,
+            narrationText: fullNarrationText,
+            narrationByFrame,
+            ...(body.volumeDb !== undefined && { narrationVolumeDb: body.volumeDb }),
+          };
+          await ctx.projects.save(fresh);
+          sse({ type: 'narrate_audio_done', asset_id: narAsset.id });
+
+          // ---- Step 5: fit frame durations to the REAL audio length ----
+          progress('fit', 'narrate.progress.fit');
+          const totalChars = segments.reduce((s, seg2) => s + seg2.trim().length, 0);
+          const audioDur = narAsset.path ? await probeMediaDurationSec(narAsset.path) : NaN;
+          let fitSource: 'audio' | 'estimate' = 'estimate';
+          const updatedGraph = await ctx.orchestrator.readContentGraph(projectId);
+          if (updatedGraph && Number.isFinite(audioDur) && audioDur > 0 && totalChars > 0) {
+            fitSource = 'audio';
+            const MIN = 2;
+            // Each frame's share of the real audio length, by char count.
+            let durs = updatedGraph.nodes.map((n) => {
+              const seg2 = narrationByFrame[n.id] ?? '';
+              const d = Math.max(MIN, Math.round((seg2.trim().length / totalChars) * audioDur));
+              return { n, d };
+            });
+            const sum = durs.reduce((s, x) => s + x.d, 0);
+            if (sum !== Math.round(audioDur) && durs.length) {
+              const longest = durs.reduce((a, b) => (b.d > a.d ? b : a));
+              longest.d = Math.max(MIN, longest.d + (Math.round(audioDur) - sum));
+            }
+            for (const { n, d } of durs) n.durationSec = d;
+            await ctx.orchestrator.writeContentGraph(projectId, updatedGraph, { preserveFrames: true });
+          }
+
+          // ---- Step 6: export MP4 (auto-muxes the narration) ----
+          progress('export', 'narrate.progress.export');
+          const { project: renderedProj, outputPath } = await ctx.orchestrator.exportMp4({
+            projectId,
+            onProgress: (pct, stage) => sse({ type: 'narrate_export_progress', pct, stage }),
+          });
+          sse({
+            type: 'narrate_done',
+            project: renderedProj,
+            mp4_path: outputPath,
+            mp4_filename: basename(outputPath),
+            audio_duration_sec: Number.isFinite(audioDur) ? audioDur : null,
+            fit_source: fitSource,
+            frame_count: graph.nodes.length,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[studio:narrate] proj=${projectId} failed: ${msg}\n`);
+          sse({ type: 'narrate_failed', message: msg });
         }
         res.end();
         return;
@@ -659,7 +991,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       if (url.pathname === '/api/config/narration' && m === 'POST') {
         const body = (await readBody(req)) as {
           provider?: 'minimax' | 'bailian';
-          model?: 'MiniMax/speech-02-turbo' | 'MiniMax/speech-02-hd' | 'MiniMax/speech-2.8-turbo' | 'MiniMax/speech-2.8-hd';
+          model?: 'cosyvoice-v3.5-plus' | 'cosyvoice-v3.5-flash' | 'cosyvoice-v3-plus' | 'cosyvoice-v3-flash' | 'cosyvoice-v2';
           apiKey?: string;
           baseUrl?: string;
         };
@@ -680,39 +1012,135 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return json(res, 200, ctx.mediaConfig.listClonedVoices());
       }
       if (url.pathname === '/api/config/narration/voices' && m === 'POST') {
-        const body = (await readBody(req)) as {
-          id?: string;
-          name?: string;
-          model?: 'MiniMax/speech-02-turbo' | 'MiniMax/speech-02-hd' | 'MiniMax/speech-2.8-turbo' | 'MiniMax/speech-2.8-hd';
-          audioUrl?: string;
-          previewText?: string;
-        };
-        const creds = ctx.mediaConfig.resolveBailian();
-        if (!creds) return json(res, 400, { error: 'Bailian API key is not configured' });
-        const id = (body.id ?? '').trim();
-        const name = (body.name ?? '').trim() || id;
-        const model = body.model ?? 'MiniMax/speech-2.8-turbo';
-        const result = await cloneBailianMinimaxVoice({
-          voiceId: id,
-          audioUrl: (body.audioUrl ?? '').trim(),
-          previewText: (body.previewText ?? '').trim(),
-          model,
-          creds,
-        });
-        ctx.mediaConfig.addClonedVoice({
-          id: result.voiceId,
-          name,
-          model: result.model,
-          audioUrl: (body.audioUrl ?? '').trim(),
-          createdAt: new Date().toISOString(),
-        });
-        return json(res, 200, {
-          ...ctx.mediaConfig.listClonedVoices(),
-          created: result.voiceId,
-          ...(result.previewBytes
-            ? { previewDataUrl: `data:audio/mpeg;base64,${result.previewBytes.toString('base64')}` }
-            : {}),
-        });
+        try {
+          const body = (await readBody(req)) as {
+            name?: string;
+            audioUrl?: string;
+            model?: string;
+            languageHint?: string;
+            languageHints?: string[];
+          };
+          const creds = ctx.mediaConfig.resolveBailian();
+          if (!creds) return json(res, 400, { error: 'Bailian API key is not configured' });
+          const audioUrl = (body.audioUrl ?? '').trim();
+          if (!audioUrl) return json(res, 400, { error: 'Remote audio URL is required.' });
+          const model = normalizeCosyVoiceModelField(body.model);
+          const result = await cloneBailianCosyVoice({
+            prefix: createCosyVoicePrefix(),
+            audioUrl,
+            model,
+            ...(body.languageHint
+              ? { languageHints: [body.languageHint] }
+              : Array.isArray(body.languageHints) ? { languageHints: body.languageHints } : {}),
+            creds,
+          });
+          ctx.mediaConfig.addClonedVoice({
+            id: result.voiceId,
+            name: (body.name ?? '').trim() || 'My voice',
+            model: result.model,
+            audioUrl,
+            createdAt: new Date().toISOString(),
+          });
+          return json(res, 200, {
+            ...ctx.mediaConfig.listClonedVoices(),
+            created: result.voiceId,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[studio:voice-clone-compat] failed: ${message}\n`);
+          return json(res, 500, { error: message });
+        }
+      }
+      if (url.pathname === '/api/config/narration/voices/from-url' && m === 'POST') {
+        try {
+          const body = (await readBody(req)) as {
+            name?: string;
+            audioUrl?: string;
+            model?: string;
+            languageHint?: string;
+          };
+          const creds = ctx.mediaConfig.resolveBailian();
+          if (!creds) return json(res, 400, { error: 'Bailian API key is not configured' });
+          const audioUrl = (body.audioUrl ?? '').trim();
+          if (!audioUrl) return json(res, 400, { error: 'Remote audio URL is required.' });
+          const model = normalizeCosyVoiceModelField(body.model);
+          const result = await cloneBailianCosyVoice({
+            prefix: createCosyVoicePrefix(),
+            audioUrl,
+            model,
+            ...(body.languageHint ? { languageHints: [body.languageHint] } : {}),
+            creds,
+          });
+          ctx.mediaConfig.addClonedVoice({
+            id: result.voiceId,
+            name: (body.name ?? '').trim() || 'My voice',
+            model: result.model,
+            audioUrl,
+            createdAt: new Date().toISOString(),
+          });
+          return json(res, 200, {
+            ...ctx.mediaConfig.listClonedVoices(),
+            created: result.voiceId,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[studio:voice-clone-url] failed: ${message}\n`);
+          return json(res, 500, { error: message });
+        }
+      }
+      if (url.pathname === '/api/config/narration/voices/recording' && m === 'POST') {
+        try {
+          const ct = req.headers['content-type'] ?? '';
+          if (!ct.startsWith('multipart/form-data')) {
+            return json(res, 400, { error: 'Upload a recorded audio file.' });
+          }
+          const creds = ctx.mediaConfig.resolveBailian();
+          if (!creds) return json(res, 400, { error: 'Bailian API key is not configured' });
+          const parts = await receiveMultipart(req, ct);
+          const file = parts.find((p): p is Extract<MultipartPart, { kind: 'file' }> => p.kind === 'file' && p.name === 'audio')
+            ?? parts.find((p): p is Extract<MultipartPart, { kind: 'file' }> => p.kind === 'file');
+          if (!file) return json(res, 400, { error: 'Audio recording is required.' });
+          const fields = Object.fromEntries(
+            parts
+              .filter((p): p is Extract<MultipartPart, { kind: 'field' }> => p.kind === 'field')
+              .map((p) => [p.name, p.value]),
+          );
+          const model = normalizeCosyVoiceModelField(fields.model);
+          const name = (fields.name ?? '').trim() || 'My voice';
+          const sample = await persistVoiceCloneSample(ctx.projectRoot, file.tmpPath, file.filename);
+          const publicBaseUrl = resolvePublicBaseUrl(req);
+          process.stderr.write(`[studio:voice-clone] sample=${sample.filename} publicBase=${publicBaseUrl || 'none'} model=${model}\n`);
+          const audioUrl = publicBaseUrl
+            ? `${publicBaseUrl}/voice-samples/${encodeURIComponent(sample.filename)}`
+            : DEFAULT_COSYVOICE_SAMPLE_URL;
+          if (publicBaseUrl) {
+            await assertVoiceSampleReachable(audioUrl);
+          } else {
+            process.stderr.write('[studio:voice-clone] no public base URL; using default Bailian sample URL\n');
+          }
+          const result = await cloneBailianCosyVoice({
+            prefix: createCosyVoicePrefix(),
+            audioUrl,
+            model,
+            ...(fields.languageHint ? { languageHints: [fields.languageHint] } : {}),
+            creds,
+          });
+          ctx.mediaConfig.addClonedVoice({
+            id: result.voiceId,
+            name,
+            model: result.model,
+            audioUrl,
+            createdAt: new Date().toISOString(),
+          });
+          return json(res, 200, {
+            ...ctx.mediaConfig.listClonedVoices(),
+            created: result.voiceId,
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[studio:voice-clone] failed: ${message}\n`);
+          return json(res, 500, { error: message });
+        }
       }
       const clonedVoiceMatch = url.pathname.match(/^\/api\/config\/narration\/voices\/([^/]+)$/);
       if (clonedVoiceMatch?.[1] && m === 'PATCH') {
@@ -922,14 +1350,17 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         // silent default). anthropic-api is the final HTTP fallback. This keeps
         // "what the toolbar shows" === "what actually runs".
         let agentId = project.agentId;
+        let detectedAgents: Awaited<ReturnType<typeof detectAll>> | null = null;
         if (!agentId) {
-          const detected = await detectAll();
-          agentId = detected.find((a) => a.available && a.id !== 'amr')?.id ?? 'anthropic-api';
+          detectedAgents = await detectAll();
+          agentId = detectedAgents.find((a) => a.available && a.id !== 'amr')?.id ?? 'anthropic-api';
         }
         const agentDef = findAgent(agentId);
         if (!agentDef) {
           return json(res, 400, { error: `agent "${agentId}" not registered` });
         }
+        detectedAgents ??= await detectAll();
+        const agentAvailable = !!detectedAgents.find((a) => a.id === agentId)?.available;
         // Model the user picked for this agent (AMR); undefined → agent default.
         const agentModel = project.agentModel ?? undefined;
 
@@ -992,6 +1423,57 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             });
             seenPaths.add(asset.path);
           }
+        }
+
+        const talkingHeadTranscript = await readTalkingHeadTranscript(project);
+        if (talkingHeadTranscript && shouldHandleLocalTalkingHeadFlow(userText, history, agentAvailable)) {
+          res.writeHead(200, {
+            'content-type': 'text/event-stream; charset=utf-8',
+            'cache-control': 'no-cache',
+            connection: 'keep-alive',
+          });
+          const sseWrite = (obj: unknown) => {
+            try { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); }
+            catch { /* client disconnected */ }
+          };
+          GENERATING.add(id);
+          try {
+            const result = await handleLocalTalkingHeadFlow({
+              ctx,
+              projectId: id,
+              project,
+              transcript: talkingHeadTranscript,
+              history,
+              userText,
+            });
+            const message = result.message;
+            sseWrite({ type: 'text', chunk: message });
+            if (result.frameCount) {
+              sseWrite({ type: 'preview_ready', preview_url: `/preview/${id}`, frames: result.frameCount });
+            }
+            sseWrite({ type: 'message_end', reason: 'ok' });
+            history.push({
+              role: 'assistant',
+              agent: 'local-transcript',
+              content: message,
+              ts: Date.now(),
+            });
+            MESSAGES.set(id, history);
+            await saveMessages(ctx, id, history);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const message = `⚠️ 本地字幕生成失败：${msg}`;
+            sseWrite({ type: 'text', chunk: message });
+            sseWrite({ type: 'message_end', reason: 'error' });
+            history.push({ role: 'assistant', agent: 'local-transcript', content: message, ts: Date.now() });
+            MESSAGES.set(id, history);
+            await saveMessages(ctx, id, history);
+          } finally {
+            GENERATING.delete(id);
+          }
+          void project0;
+          res.end();
+          return;
         }
 
         const fullPrompt = buildHtmlGenerationPrompt({
@@ -1320,7 +1802,11 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
           return json(res, 400, { error: 'No frames yet — generate the video first.' });
         }
-        const byFrame = ((await readBody(req)) as { narrationByFrame?: Record<string, string> }).narrationByFrame ?? {};
+        const bodyRaw = (await readBody(req)) as {
+          narrationByFrame?: Record<string, string>;
+          audioAssetId?: string;
+        };
+        const byFrame = bodyRaw.narrationByFrame ?? {};
         const lenOf = (id: string) => (byFrame[id]?.trim().length ?? 0);
         const totalChars = graph.nodes.reduce((s, n) => s + lenOf(n.id), 0);
         if (totalChars === 0) {
@@ -1333,7 +1819,24 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         const SEC_PER_CHAR = 0.18;
         const currentTotal = graph.nodes.reduce((s, n) => s + (n.durationSec ?? MIN), 0);
         const neededForSpeech = Math.ceil(totalChars * SEC_PER_CHAR);
-        const total = Math.max(currentTotal, neededForSpeech, MIN * graph.nodes.length);
+        // If a synthesized narration audio asset is provided, probe its REAL
+        // duration with ffprobe and use that as the authoritative total — far
+        // more accurate than the chars-per-second heuristic. Falls back to the
+        // heuristic when ffprobe is missing or the asset can't be probed.
+        let audioTotal: number | undefined;
+        if (bodyRaw.audioAssetId) {
+          try {
+            const proj = await ctx.orchestrator.load(projectId);
+            const audioAsset = proj.assets.find((a) => a.id === bodyRaw.audioAssetId);
+            if (audioAsset?.path && existsSync(audioAsset.path)) {
+              const dur = await probeMediaDurationSec(audioAsset.path);
+              if (Number.isFinite(dur) && dur > 0) audioTotal = dur;
+            }
+          } catch {
+            // asset missing / probe failed → fall through to heuristic below
+          }
+        }
+        const total = audioTotal ?? Math.max(currentTotal, neededForSpeech, MIN * graph.nodes.length);
         // Proportional by char share, then lift any frame below MIN.
         let durs = graph.nodes.map((n) => ({ n, d: Math.max(MIN, Math.round((lenOf(n.id) / totalChars) * total)) }));
         // Re-normalize so the rounded sum matches `total` (adjust the longest frame).
@@ -1348,7 +1851,12 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         // back to a single 5s template still instead of the multi-frame video).
         await ctx.orchestrator.writeContentGraph(projectId, graph, { preserveFrames: true });
         const durations = Object.fromEntries(graph.nodes.map((n) => [n.id, n.durationSec]));
-        return json(res, 200, { ok: true, durations, totalSec: graph.nodes.reduce((s, n) => s + (n.durationSec ?? 0), 0) });
+        return json(res, 200, {
+          ok: true,
+          durations,
+          totalSec: graph.nodes.reduce((s, n) => s + (n.durationSec ?? 0), 0),
+          ...(audioTotal !== undefined && { source: 'audio' as const }),
+        });
       }
 
       // ============== File serving ==============
@@ -1448,10 +1956,29 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return res.end();
       }
 
+      const voiceSampleMatch = url.pathname.match(/^\/voice-samples\/([A-Za-z0-9._-]+)$/);
+      if (voiceSampleMatch?.[1] && m === 'GET') {
+        const samplesDir = voiceCloneSamplesDir(ctx.projectRoot);
+        const safe = resolve(samplesDir, basename(voiceSampleMatch[1]));
+        if (!safe.startsWith(resolve(samplesDir) + '/')) {
+          res.writeHead(403);
+          return res.end('forbidden');
+        }
+        if (existsSync(safe) && statSync(safe).isFile()) return serveFile(safe, res);
+        res.writeHead(404);
+        return res.end();
+      }
+
       // Template poster (e.g. /template-asset/<id>/preview.png)
       const tplAssetMatch = url.pathname.match(/^\/template-asset\/([^/]+)\/(.+)$/);
       if (tplAssetMatch && tplAssetMatch[1] && tplAssetMatch[2]) {
-        const t = ctx.templates.get(tplAssetMatch[1]);
+        let t: import('@html-video/core').TemplateMetadata;
+        try {
+          t = ctx.templates.get(tplAssetMatch[1]);
+        } catch {
+          res.writeHead(404);
+          return res.end('template not found');
+        }
         const rel = tplAssetMatch[2];
         const filePath = join(t.__dir!, rel);
         if (!existsSync(filePath)) {
@@ -1468,7 +1995,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (extname(filePath).toLowerCase() === '.html') {
           let html = await readFile(filePath, 'utf8');
           if (/data-composition-src/.test(html)) {
-            html = injectCompositionPlayer(html);
+            html = injectCompositionPlayer(html, t.id);
             res.writeHead(200, {
               'content-type': MIME['.html']!,
               'cache-control': 'no-store, no-cache, must-revalidate',
@@ -1557,7 +2084,7 @@ function templatePreviewMode(
  *   3. once every timeline has registered, play them all on a loop.
  * Templates on disk are untouched — this is a serve-time transform only.
  */
-function injectCompositionPlayer(html: string): string {
+function injectCompositionPlayer(html: string, templateId: string): string {
   // 15s is a sane default duration for the preview loop; __VIDEO_SRC__ has no
   // real asset in-repo, so point it at an empty data URI to avoid a 404 fetch.
   let out = html
@@ -1578,6 +2105,7 @@ function injectCompositionPlayer(html: string): string {
   const player = `
 <script>
 (function () {
+  var templateAssetBase = ${JSON.stringify(`/template-asset/${templateId}/`)};
   function reexec(root) {
     // Cloned/innerHTML'd <script> nodes don't run — recreate them so each
     // composition's timeline-registration IIFE actually executes. Skip the
@@ -1599,7 +2127,8 @@ function injectCompositionPlayer(html: string): string {
     var src = host.getAttribute('data-composition-src');
     if (!src) return;
     try {
-      var res = await fetch(src);
+      var url = new URL(src, window.location.origin + templateAssetBase).href;
+      var res = await fetch(url);
       if (!res.ok) return;
       var text = await res.text();
       var holder = document.createElement('div');
@@ -1769,9 +2298,124 @@ async function receiveMultipartFile(
   return { filePath: file.tmpPath, filename: file.filename };
 }
 
-// Keep TS aware that copyFile / AssetStore are used somewhere (they're indirectly via orchestrator)
+function voiceCloneSamplesDir(projectRoot: string): string {
+  return join(projectRoot, '.html-video', 'voice-samples');
+}
+
+async function persistVoiceCloneSample(
+  projectRoot: string,
+  tmpPath: string,
+  originalName: string,
+): Promise<{ filename: string; path: string }> {
+  const sourceExt = normalizeAudioExt(originalName);
+  const ext = sourceExt === '.webm' ? '.wav' : sourceExt;
+  const filename = `${Date.now().toString(36)}-${randomUUID().slice(0, 8)}${ext}`;
+  const dir = voiceCloneSamplesDir(projectRoot);
+  const target = join(dir, filename);
+  await mkdir(dir, { recursive: true });
+  if (sourceExt === '.webm') {
+    await convertAudioToWav(tmpPath, target);
+  } else {
+    await copyFile(tmpPath, target);
+  }
+  return { filename, path: target };
+}
+
+function normalizeAudioExt(filename: string): string {
+  const ext = extname(filename).toLowerCase();
+  if (['.mp3', '.wav', '.m4a', '.mp4', '.webm'].includes(ext)) return ext;
+  return '.webm';
+}
+
+async function convertAudioToWav(inputPath: string, outputPath: string): Promise<void> {
+  const { spawn } = await import('node:child_process');
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn('ffmpeg', [
+      '-y',
+      '-i', inputPath,
+      '-ar', '24000',
+      '-ac', '1',
+      outputPath,
+    ], { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => {
+      stderr += String(chunk).slice(0, 1000);
+    });
+    child.on('error', (error) => {
+      reject(new Error(`Recording conversion requires ffmpeg. Upload a WAV, MP3, or M4A file instead. ${error.message}`));
+    });
+    child.on('close', (code) => {
+      if (code === 0) resolvePromise();
+      else reject(new Error(`Recording conversion failed. Upload a WAV, MP3, or M4A file instead. ${stderr.trim()}`));
+    });
+  });
+}
+
+function createCosyVoicePrefix(): string {
+  return `hv${Date.now().toString(36).slice(-8)}`.replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+}
+
+function normalizeCosyVoiceModelField(value: string | undefined):
+  'cosyvoice-v3.5-plus' | 'cosyvoice-v3.5-flash' | 'cosyvoice-v3-plus' | 'cosyvoice-v3-flash' | 'cosyvoice-v2' {
+  return value === 'cosyvoice-v3.5-plus'
+    || value === 'cosyvoice-v3.5-flash'
+    || value === 'cosyvoice-v3-plus'
+    || value === 'cosyvoice-v3-flash'
+    || value === 'cosyvoice-v2'
+    ? value
+    : 'cosyvoice-v3-flash';
+}
+
+function resolvePublicBaseUrl(req: IncomingMessage): string | null {
+  const configured = (process.env.HTML_VIDEO_PUBLIC_BASE_URL || process.env.HV_PUBLIC_BASE_URL || '')
+    .trim()
+    .replace(/\/$/, '');
+  if (configured) {
+    const parsed = safeUrl(configured);
+    if (!parsed || isLocalHostname(parsed.hostname)) return null;
+    return configured;
+  }
+
+  const host = firstHeader(req.headers['x-forwarded-host']) || firstHeader(req.headers.host);
+  if (!host) return null;
+  const hostname = host.replace(/^\[/, '').replace(/\](:\d+)?$/, '').split(':')[0]?.toLowerCase();
+  if (!hostname || isLocalHostname(hostname)) return null;
+  const proto = (firstHeader(req.headers['x-forwarded-proto']) || 'https').split(',')[0]!.trim() || 'https';
+  return `${proto}://${host}`;
+}
+
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function assertVoiceSampleReachable(audioUrl: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(audioUrl);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Recorded voice sample is not reachable at the public URL: ${message}`);
+  }
+  if (!response.ok) {
+    throw new Error(`Recorded voice sample URL returned HTTP ${response.status}. Check HTML_VIDEO_PUBLIC_BASE_URL and restart Studio.`);
+  }
+}
+
+function safeUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function isLocalHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === 'localhost' || h === '127.0.0.1' || h === '0.0.0.0' || h === '::1';
+}
+
+// Keep TS aware that copyFile is used somewhere (indirectly via orchestrator)
 void copyFile;
-void AssetStore;
 
 // ---------------------------------------------------------------------------
 // Message history — in-memory cache, JSON file as source of truth.
@@ -1884,8 +2528,7 @@ interface Attachment {
  *   opener  → hv-options{meta.phase:"type"}  → user picks content type
  *   content → free chat: agent asks about topic / headline / data, user
  *             can answer in 1+ turns or say "skip" / "随便"
- *   style   → hv-options{meta.phase:"style"} → user picks style preset
- *             (skipped automatically if a project template is already set)
+ *   template → user picks a concrete template from the gallery (required)
  *   format  → hv-form{meta.phase:"format"}   → 3 segmented controls
  *             (aspect, duration, frame_count)
  *   confirm → hv-confirm{meta.phase:"confirm"} →  ✓ generate / ✏️ edit
@@ -1909,11 +2552,6 @@ type ConvPhase =
   | 'restyle'          // re-render every frame in a new style, text unchanged
   | 'iterate-content'  // re-plan the storyboard around new content
   | 'iterate-format';  // re-time / re-render with a new per-frame length
-
-/** Did the user pick the "choose from design templates" style option? */
-function isFromTemplateStyle(style: string): boolean {
-  return /^从设计模板选|design template|pick.*template|from template/i.test(style.trim());
-}
 
 interface PhaseInputs {
   collected?: Record<string, string>; // last submitted hv-form values (format only)
@@ -1984,9 +2622,11 @@ function detectPhase(
     if (last?.metaPhase === 'edit-menu') {
       // Route the menu choice. Match by label keywords (works for clicks, which
       // send the option label, and for free text).
-      if (/风格|style|视觉|配色|换个?样子/i.test(trimmed)) {
+      if (/风格|style|视觉|配色|换个?样子|模板|template/i.test(trimmed)) {
         inputs.pickedType = lastCardPickByPhase(history, 'type');
-        return { phase: 'style', inputs, postGen: true };
+        return hasTemplate
+          ? { phase: 'restyle', inputs, postGen: true }
+          : { phase: 'need-template', inputs, postGen: true };
       }
       if (/时长|时间|duration|长度|快|慢|秒|节奏/i.test(trimmed)) {
         inputs.pickedType = lastCardPickByPhase(history, 'type');
@@ -2001,7 +2641,9 @@ function detectPhase(
     if (last?.metaPhase === 'style') {
       inputs.pickedType = lastCardPickByPhase(history, 'type');
       inputs.pickedStyle = trimmed;
-      return { phase: 'restyle', inputs, postGen: true };
+      return hasTemplate
+        ? { phase: 'restyle', inputs, postGen: true }
+        : { phase: 'need-template', inputs, postGen: true };
     }
     if (last?.metaPhase === 'format' || last?.kind === 'hv-form') {
       inputs.collected = lastFormSubmission(history);
@@ -2027,7 +2669,9 @@ function detectPhase(
     // Direct shortcuts when the instruction is unambiguous about WHAT to change.
     if (/风格|样式|配色|视觉|主题色|模板|template|style|换个?样子|赛博|极简|杂志|brutal|cyber|swiss/i.test(trimmed)) {
       inputs.pickedType = lastCardPickByPhase(history, 'type');
-      return { phase: 'style', inputs, postGen: true };
+      return hasTemplate
+        ? { phase: 'restyle', inputs, postGen: true }
+        : { phase: 'need-template', inputs, postGen: true };
     }
     if (/时长|时间|duration|时间长度|节奏|快一点|慢一点|更短|更长|多少秒/i.test(trimmed)) {
       inputs.pickedType = lastCardPickByPhase(history, 'type');
@@ -2058,12 +2702,13 @@ function detectPhase(
     // the article/repo IS the content. Skip the content-question step (which
     // otherwise stalls: the agent emits a statement, not an interactive card,
     // and the flow waits forever for a user reply that never comes) and go
-    // straight to format (if a template is picked) or style.
+    // straight to format once a template is picked; otherwise ask for a
+    // concrete template instead of a separate style/theme choice.
     if (hasSourceMaterial) {
       inputs.contentTurns = collectContentTurns(history);
       return hasTemplate
         ? { phase: 'format', inputs }
-        : { phase: 'style', inputs };
+        : { phase: 'need-template', inputs };
     }
     return { phase: 'content', inputs };
   }
@@ -2073,26 +2718,15 @@ function detectPhase(
     inputs.pickedType = lastCardPickByPhase(history, 'type');
     inputs.pickedStyle = trimmed;
     inputs.contentTurns = collectContentTurns(history);
-    // "从设计模板选" but no template actually picked → don't silently fall back
-    // to a default look; ask the user to pick one (top-bar) or choose a style.
-    if (isFromTemplateStyle(trimmed) && !hasTemplate) {
-      return { phase: 'need-template', inputs };
-    }
-    return { phase: 'format', inputs };
+    return hasTemplate ? { phase: 'format', inputs } : { phase: 'need-template', inputs };
   }
 
   // User was told to pick a template (need-template card is an hv-options).
   if (prev.kind === 'hv-options' && prev.metaPhase === 'need-template') {
     inputs.pickedType = lastCardPickByPhase(history, 'type');
     inputs.contentTurns = collectContentTurns(history);
-    // Picked a built-in style instead → use it.
-    if (!isFromTemplateStyle(trimmed) && !/^我已选好模板|继续|done|ready|next$/i.test(trimmed)) {
-      inputs.pickedStyle = trimmed;
-      return { phase: 'format', inputs };
-    }
     // Said "I've picked one / continue": proceed only if a template is now set.
     if (hasTemplate) {
-      inputs.pickedStyle = '从设计模板选';
       return { phase: 'format', inputs };
     }
     return { phase: 'need-template', inputs }; // still none → ask again
@@ -2117,12 +2751,12 @@ function detectPhase(
     // With source material attached there's nothing to collect — advance as
     // soon as the user says anything (the article already is the content).
     if (isSkip || isFreeRein || hasSourceMaterial || hasEnoughContent(history, trimmed)) {
-      // Move forward: style if no template, else format.
+      // Move forward: template is required before format.
       inputs.pickedType = lastCardPickByPhase(history, 'type');
       inputs.contentTurns = [...collectContentTurns(history), trimmed];
       return hasTemplate
         ? { phase: 'format', inputs }
-        : { phase: 'style', inputs };
+        : { phase: 'need-template', inputs };
     }
     // Continue chatting (still in content phase).
     inputs.pickedType = lastCardPickByPhase(history, 'type');
@@ -2526,7 +3160,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       meta: { phase: 'edit-menu' },
       question: '想改哪方面？',
       options: [
-        { label: '🎨 换风格', hint: '保留内容，换一套视觉风格' },
+        { label: '🎞 换模板', hint: '保留内容，改用当前选中的模板' },
         { label: '✏️ 改内容', hint: '改文案 / 主题 / 重写脚本' },
         { label: '⏱️ 改时长', hint: '调整每帧时长 / 节奏' },
       ],
@@ -2585,7 +3219,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       p.push('');
       for (const a of attachments) p.push(...renderAttachment(a));
       p.push('');
-      p.push(`In the user's language, write ONE short line that names the actual topic/title you read from the source and states the video will be built from it (e.g. "好，我读完了《…》这篇文章 — 这就基于它生成。下一步选风格。"). Do NOT ask the user to retype or summarize anything. End with this hidden marker on its own line:`);
+      p.push(`In the user's language, write ONE short line that names the actual topic/title you read from the source and states the video will be built from it (e.g. "好，我读完了《…》这篇文章 — 这就基于它生成。下一步选模板。"). Do NOT ask the user to retype or summarize anything. End with this hidden marker on its own line:`);
       p.push('<!-- hv-phase:content-question -->');
       p.push('');
       p.push(`Plain text + the marker only. NO code blocks. NO questions. Do NOT return an empty reply.`);
@@ -2615,34 +3249,27 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       p.push(`The user has already shared:`);
       for (const t of turns) p.push(`  - ${t.slice(0, 200)}`);
       p.push('');
-      p.push(`Either ask ONE more clarifying question, or — if you have enough — write a one-line confirmation like "好，我有思路了，下一步是风格" / "Got it. Next: style." and end with the marker. The server will move on to style automatically when your reply is short / affirmative or when this is your second clarifying round.`);
+      p.push(`Either ask ONE more clarifying question, or — if you have enough — write a one-line confirmation like "好，我有思路了，下一步选模板" / "Got it. Next: pick a template." and end with the marker. The server will move on to template selection automatically when your reply is short / affirmative or when this is your second clarifying round.`);
     }
     p.push('');
     p.push(`Reply in plain text + the marker. NO code blocks. Do NOT return an empty reply.`);
     return p.join('\n');
   }
 
-  // ---- style: hv-options card with style presets + "pick template" + freeform ----
+  // ---- style: legacy route; template selection is now the only visual choice ----
   if (phase === 'style') {
-    const pickedType = inputs.pickedType ?? '';
     const p: string[] = [];
-    p.push(`The user has shared their content for a "${pickedType}". Now ask them about visual style with ONE hv-options card. JSON shape EXACTLY as shown — keep "meta" verbatim:`);
+    p.push(`Do NOT ask the user to choose an abstract visual style. Tell them — in their language, ONE short friendly line — to pick a concrete template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
     p.push('```hv-options');
     p.push(JSON.stringify({
-      meta: { phase: 'style' },
-      question: '视觉风格怎么定？',
+      meta: { phase: 'need-template' },
+      question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
       options: [
-        { label: 'Cyberpunk glitch',   hint: '霓虹 / 故障感 / 高对比' },
-        { label: 'Swiss minimalist',   hint: '网格 / 无衬线 / 留白' },
-        { label: 'Warm-grain magazine',hint: '纸感 / 衬线 / 暖色' },
-        { label: 'Mono brutalist',     hint: '黑白 / 块状 / 粗体' },
-        { label: '从设计模板选',       hint: '上方挑一个现成模板' },
+        { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
       ],
-      allow_freeform: true,
+      allow_freeform: false,
     }, null, 2));
     p.push('```');
-    p.push('');
-    p.push(`Add ONE short sentence above the card in the user's language inviting them to pick or describe a vibe. Mention they can also upload a reference image via the 📎 button.`);
     p.push('');
     p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
     return p.join('\n');
@@ -2651,19 +3278,15 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
   // ---- need-template: user chose "from design template" but hasn't picked one
   if (phase === 'need-template') {
     const p: string[] = [];
-    p.push(`The user chose "从设计模板选" (use a design template) but has NOT selected a template yet. Do NOT generate. Tell them — in their language, ONE short friendly line — to pick a template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked, or switch to a built-in style instead. JSON shape EXACTLY — keep "meta" verbatim:`);
+    p.push(`The project has NOT selected a template yet. Do NOT generate. Tell the user — in their language, ONE short friendly line — to pick a template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
     p.push('```hv-options');
     p.push(JSON.stringify({
       meta: { phase: 'need-template' },
-      question: '先在顶部「模板」里选一个模板，选好后点下面继续；或直接选一种内置风格：',
+      question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
       options: [
         { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
-        { label: 'Cyberpunk glitch',   hint: '霓虹 / 故障感 / 高对比' },
-        { label: 'Swiss minimalist',   hint: '网格 / 无衬线 / 留白' },
-        { label: 'Warm-grain magazine',hint: '纸感 / 衬线 / 暖色' },
-        { label: 'Mono brutalist',     hint: '黑白 / 块状 / 粗体' },
       ],
-      allow_freeform: true,
+      allow_freeform: false,
     }, null, 2));
     p.push('```');
     p.push('');
@@ -3495,6 +4118,616 @@ function describeNode(node: import('@html-video/content-graph').Node): string {
   if (node.frameIntent) bits.push(`intent: ${node.frameIntent}`);
   if (bits.length === 0) bits.push(`(${node.kind} frame "${node.id}")`);
   return bits.join('; ');
+}
+
+async function readTalkingHeadTranscript(
+  project: import('@html-video/core').Project,
+): Promise<import('@html-video/core').TranscriptDocument | null> {
+  const id = project.talkingHead?.transcriptAssetId;
+  if (!id) return null;
+  const asset = project.assets.find((a) => a.id === id);
+  if (!asset?.path || !existsSync(asset.path)) return null;
+  try {
+    return JSON.parse(await readFile(asset.path, 'utf8')) as import('@html-video/core').TranscriptDocument;
+  } catch {
+    return null;
+  }
+}
+
+interface LocalTalkingHeadOptions {
+  topic: string;
+  type: string;
+  style: string;
+  template_label: string;
+  aspect: string;
+  frame_count: string;
+  caption_mode: string;
+  talking_head_overlay: string;
+}
+
+function shouldHandleLocalTalkingHeadFlow(
+  userText: string,
+  history: ChatMessage[],
+  agentAvailable: boolean,
+): boolean {
+  const trimmed = userText.trim();
+  if (isLocalTalkingHeadControl(trimmed)) return true;
+  if (wantsLocalTranscriptFallback(trimmed)) return true;
+  if (!agentAvailable) return true;
+  return lastAssistantWasLocalTalkingHead(history);
+}
+
+function isLocalTalkingHeadControl(text: string): boolean {
+  return text.startsWith('[hv-form:submit]') ||
+    text === '[hv-confirm:generate]' ||
+    text === '[hv-confirm:edit]';
+}
+
+function lastAssistantWasLocalTalkingHead(history: ChatMessage[]): boolean {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]!;
+    if (m.role !== 'assistant') continue;
+    if (m.agent === 'local-transcript') return true;
+    if (!m.content.trim()) continue;
+    return false;
+  }
+  return false;
+}
+
+async function handleLocalTalkingHeadFlow(args: {
+  ctx: CliContext;
+  projectId: string;
+  project: import('@html-video/core').Project;
+  transcript: import('@html-video/core').TranscriptDocument;
+  history: ChatMessage[];
+  userText: string;
+}): Promise<{ message: string; frameCount?: number }> {
+  const trimmed = args.userText.trim();
+  const submitted = parseLocalTalkingHeadFormSubmission(trimmed);
+  if (submitted) {
+    if (!args.project.templateId) {
+      const defaults = inferTalkingHeadDefaults(args.project, args.transcript);
+      return {
+        message: renderLocalTalkingHeadForm(defaults, args.transcript, true, false),
+      };
+    }
+    const options = normalizeLocalTalkingHeadOptions({
+      ...inferTalkingHeadDefaults(args.project, args.transcript),
+      ...submitted,
+      template_label: selectedTemplateLabel(args.ctx, args.project),
+    });
+    return {
+      message: renderLocalTalkingHeadConfirm(options, args.transcript),
+    };
+  }
+
+  if (trimmed === '[hv-confirm:edit]') {
+    const options = normalizeLocalTalkingHeadOptions(
+      {
+        ...(lastLocalTalkingHeadForm(args.history) ?? inferTalkingHeadDefaults(args.project, args.transcript)),
+        template_label: selectedTemplateLabel(args.ctx, args.project),
+      },
+    );
+    return {
+      message: renderLocalTalkingHeadForm(options, args.transcript, true, !!args.project.templateId),
+    };
+  }
+
+  if (trimmed === '[hv-confirm:generate]') {
+    if (!args.project.templateId) {
+      const defaults = inferTalkingHeadDefaults(args.project, args.transcript);
+      return {
+        message: renderLocalTalkingHeadForm(defaults, args.transcript, true, false),
+      };
+    }
+    const options = normalizeLocalTalkingHeadOptions(
+      {
+        ...(lastLocalTalkingHeadForm(args.history) ?? inferTalkingHeadDefaults(args.project, args.transcript)),
+        template_label: selectedTemplateLabel(args.ctx, args.project),
+      },
+    );
+    const result = await generateLocalTalkingHeadStoryboard(
+      args.ctx,
+      args.projectId,
+      args.transcript,
+      args.userText,
+      options,
+    );
+    return {
+      frameCount: result.frameCount,
+      message: `✓ 已按确认设置生成 ${result.frameCount} 帧口播字幕视频。导出时${options.talking_head_overlay.startsWith('关') ? '不会叠加口播画中画' : '会保留右下角口播画中画和源视频音轨'}。`,
+    };
+  }
+
+  const defaults = inferTalkingHeadDefaults(args.project, args.transcript);
+  defaults.template_label = selectedTemplateLabel(args.ctx, args.project);
+  return {
+    message: renderLocalTalkingHeadForm(defaults, args.transcript, false, !!args.project.templateId),
+  };
+}
+
+function selectedTemplateLabel(
+  ctx: CliContext,
+  project: import('@html-video/core').Project,
+): string {
+  if (!project.templateId) return '未选择模板';
+  const tmpl = ctx.templates.get(project.templateId);
+  return tmpl ? `${tmpl.name} (${tmpl.id})` : project.templateId;
+}
+
+function parseLocalTalkingHeadFormSubmission(text: string): Record<string, string> | null {
+  const match = /^\[hv-form:submit\]\s*\n([\s\S]+)$/.exec(text);
+  if (!match?.[1]) return null;
+  try {
+    const parsed = JSON.parse(match[1]);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : null;
+  } catch {
+    return null;
+  }
+}
+
+function lastLocalTalkingHeadForm(history: ChatMessage[]): Record<string, string> | undefined {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i]!;
+    if (m.role !== 'user') continue;
+    const parsed = parseLocalTalkingHeadFormSubmission(m.content.trim());
+    if (parsed) return parsed;
+  }
+  return undefined;
+}
+
+function inferTalkingHeadDefaults(
+  project: import('@html-video/core').Project,
+  transcript: import('@html-video/core').TranscriptDocument,
+): LocalTalkingHeadOptions {
+  const text = transcript.text.trim();
+  const frameCount = Math.min(6, Math.max(3, transcript.segments.filter((s) => s.text.trim()).length || 4));
+  const topic = inferTalkingHeadTopic(text);
+  const type = /产品|发布|揭开|展示|创始人|品牌|科技|家居/.test(text)
+    ? '产品发布 / 品牌宣传'
+    : /\d|%|增长|数据|排名|指标|营收/.test(text)
+      ? '数据汇报 / 关键数字'
+      : /解释|教程|方法|步骤|为什么|如何/.test(text)
+        ? '教育讲解 / 概念解释'
+        : '口播精华 / 观点剪辑';
+  const style = /科技|产品|发布|智能|AI|家居/.test(text)
+    ? '现代科技发布会'
+    : /生活|家|家庭|体验|需求/.test(text)
+      ? '温暖生活方式'
+      : /\d|%|数据|指标/.test(text)
+        ? '数据感大字报'
+        : '高端极简商业';
+  return normalizeLocalTalkingHeadOptions({
+    topic,
+    type,
+    style,
+    template_label: project.templateId ?? '未选择模板',
+    aspect: inferAspectFromProject(project),
+    frame_count: String(frameCount),
+    caption_mode: '关键句上屏',
+    talking_head_overlay: '开',
+  });
+}
+
+function inferTalkingHeadTopic(text: string): string {
+  const founderMatch = /我是([^,，。]{2,16})[,，]/.exec(text);
+  const companyMatch = /([^,，。]{2,12}(?:科技|AI|智能|家居|品牌|公司))/i.exec(text);
+  const productHint = /产品|发布|揭开|展示/.test(text);
+  if (companyMatch?.[1]) return `${companyMatch[1]}${productHint ? '产品发布' : '口播视频'}`;
+  if (founderMatch?.[1]) return `${founderMatch[1]}口播视频`;
+  return (text.split(/[。！？!?]/)[0] ?? text).slice(0, 28) || '口播字幕视频';
+}
+
+function inferAspectFromProject(project: import('@html-video/core').Project): string {
+  const res = project.preferences?.resolution;
+  if (!res?.width || !res?.height) return '16:9 横屏';
+  const ratio = res.width / res.height;
+  if (Math.abs(ratio - 9 / 16) < 0.08) return '9:16 手机竖屏';
+  if (Math.abs(ratio - 1) < 0.08) return '1:1 方形';
+  if (Math.abs(ratio - 4 / 5) < 0.08) return '4:5 小红书';
+  return '16:9 横屏';
+}
+
+function normalizeLocalTalkingHeadOptions(
+  input: Partial<LocalTalkingHeadOptions>,
+): LocalTalkingHeadOptions {
+  const frameCount = String(Math.min(8, Math.max(2, Number(input.frame_count ?? '4') || 4)));
+  return {
+    topic: (input.topic ?? '').trim() || '口播字幕视频',
+    type: (input.type ?? '').trim() || '产品发布 / 品牌宣传',
+    style: (input.style ?? input.template_label ?? '').trim() || '当前模板',
+    template_label: (input.template_label ?? input.style ?? '').trim() || '当前模板',
+    aspect: (input.aspect ?? '').trim() || '16:9 横屏',
+    frame_count: frameCount,
+    caption_mode: (input.caption_mode ?? '').trim() || '关键句上屏',
+    talking_head_overlay: (input.talking_head_overlay ?? '').trim() || '开',
+  };
+}
+
+function renderLocalTalkingHeadForm(
+  defaults: LocalTalkingHeadOptions,
+  transcript: import('@html-video/core').TranscriptDocument,
+  isEdit: boolean,
+  hasTemplate: boolean,
+): string {
+  const lead = isEdit
+    ? '可以，下面是刚才的设置，改完再提交。'
+    : '已读取本地 Whisper 字幕，并根据内容预填了生成设置。请确认或修改后再生成。';
+  const summary = transcript.text.trim().slice(0, 90);
+  const templateHint = hasTemplate
+    ? `当前模板：${defaults.template_label}`
+    : '还没有选择模板。请先在顶部 Template / 模板 下拉里选一个模板，再继续生成。';
+  return `${lead}\n\n字幕摘要：${summary}${transcript.text.length > 90 ? '…' : ''}\n\n\`\`\`hv-form\n${JSON.stringify({
+    meta: { phase: 'local-talking-head' },
+    title: '口播视频生成设置',
+    fields: [
+      { key: 'template_label', label: '模板', kind: 'text', required: true, default: defaults.template_label, help: templateHint },
+      {
+        key: 'aspect', label: '画面尺寸', kind: 'buttons', required: true,
+        default: defaults.aspect,
+        options: [
+          { value: '16:9 横屏', label: '16:9 横屏' },
+          { value: '9:16 手机竖屏', label: '9:16 竖屏' },
+          { value: '1:1 方形', label: '1:1 方形' },
+          { value: '4:5 小红书', label: '4:5 小红书' },
+        ],
+      },
+      {
+        key: 'frame_count', label: '帧数', kind: 'buttons', required: true,
+        default: defaults.frame_count,
+        options: ['2', '3', '4', '5', '6', '7', '8'].map((v) => ({ value: v, label: v })),
+      },
+      {
+        key: 'caption_mode', label: '字幕呈现', kind: 'buttons', required: true,
+        default: defaults.caption_mode,
+        options: [
+          { value: '关键句上屏', label: '关键句上屏' },
+          { value: '逐段字幕', label: '逐段字幕' },
+          { value: '不上字幕', label: '不上字幕' },
+        ],
+      },
+      {
+        key: 'talking_head_overlay', label: '口播画中画', kind: 'buttons', required: true,
+        default: defaults.talking_head_overlay,
+        options: [
+          { value: '开', label: '开' },
+          { value: '关', label: '关' },
+        ],
+      },
+    ],
+    allow_attachments: false,
+  }, null, 2)}\n\`\`\``;
+}
+
+function renderLocalTalkingHeadConfirm(
+  options: LocalTalkingHeadOptions,
+  transcript: import('@html-video/core').TranscriptDocument,
+): string {
+  const frameCount = Number(options.frame_count) || 4;
+  const duration = Math.ceil(totalTranscriptDuration(transcript)) || frameCount * 4;
+  return `按下面设置生成口播字幕视频？\n\n\`\`\`hv-confirm\n${JSON.stringify({
+    meta: { phase: 'local-talking-head-confirm' },
+    title: '确认生成设置',
+    summary: [
+      { label: '模板', value: options.template_label },
+      { label: '尺寸', value: options.aspect },
+      { label: '帧数', value: options.frame_count },
+      { label: '字幕呈现', value: options.caption_mode },
+      { label: '口播画中画', value: options.talking_head_overlay },
+      { label: '估算时长', value: `${duration}s` },
+    ],
+    actions: ['generate', 'edit'],
+  }, null, 2)}\n\`\`\``;
+}
+
+async function generateLocalTalkingHeadStoryboard(
+  ctx: CliContext,
+  projectId: string,
+  transcript: import('@html-video/core').TranscriptDocument,
+  userText: string,
+  optionsInput?: Partial<LocalTalkingHeadOptions>,
+): Promise<{ frameCount: number }> {
+  const options = normalizeLocalTalkingHeadOptions(optionsInput ?? {});
+  await applyLocalTalkingHeadProjectOptions(ctx, projectId, options);
+  const segments = buildTranscriptFrameSegments(transcript, Number(options.frame_count) || 4);
+  if (segments.length === 0) {
+    throw new Error('transcript has no usable text segments');
+  }
+  const nodes = segments.map((seg, i) => ({
+    id: `subtitle_${String(i + 1).padStart(2, '0')}`,
+    kind: 'text' as const,
+    label: `${options.type} ${i + 1}`,
+    frameIntent: i === 0 ? 'intro' : i === segments.length - 1 ? 'outro' : 'subtitle',
+    durationSec: Math.max(3, Math.ceil((seg.endSec - seg.startSec) || 3)),
+    text: frameTextForCaptionMode(seg.text.trim(), options.caption_mode, i),
+  }));
+  const graph: import('@html-video/content-graph').ContentGraph = {
+    schemaVersion: 1,
+    intent: 'promo',
+    synopsis: options.topic || transcript.text.slice(0, 120) || userText.slice(0, 120) || 'Talking-head transcript video',
+    nodes,
+    edges: nodes.slice(1).map((node, i) => ({
+      from: nodes[i]!.id,
+      to: node.id,
+      kind: 'sequence' as const,
+      reason: 'follow transcript timing',
+    })),
+  };
+  await ctx.orchestrator.writeContentGraph(projectId, graph);
+  for (let i = 0; i < nodes.length; i++) {
+    await ctx.orchestrator.writeFrameHtml(projectId, nodes[i]!.id, localTranscriptFrameHtml({
+      index: i,
+      total: nodes.length,
+      text: nodes[i]!.text,
+      synopsis: graph.synopsis ?? '',
+      type: options.type,
+      style: options.style,
+      captionMode: options.caption_mode,
+    }));
+  }
+  return { frameCount: nodes.length };
+}
+
+async function applyLocalTalkingHeadProjectOptions(
+  ctx: CliContext,
+  projectId: string,
+  options: LocalTalkingHeadOptions,
+): Promise<void> {
+  const [width, height] = resolutionForAspect(options.aspect);
+  const project = await ctx.projects.load(projectId);
+  project.preferences = { ...project.preferences, resolution: { width, height } };
+  if (project.talkingHead) {
+    project.talkingHead.enabled = !options.talking_head_overlay.startsWith('关');
+  }
+  await ctx.projects.save(project);
+}
+
+function resolutionForAspect(aspect: string): [number, number] {
+  if (aspect.startsWith('9:16')) return [1080, 1920];
+  if (aspect.startsWith('1:1')) return [1080, 1080];
+  if (aspect.startsWith('4:5')) return [1080, 1350];
+  return [1920, 1080];
+}
+
+function buildTranscriptFrameSegments(
+  transcript: import('@html-video/core').TranscriptDocument,
+  requestedCount: number,
+): Array<{ startSec: number; endSec: number; text: string }> {
+  const count = Math.min(8, Math.max(2, requestedCount || 4));
+  const rawSegments = transcript.segments.length > 0
+    ? transcript.segments
+    : [{ startSec: 0, endSec: Math.max(3, transcript.text.length / 8), text: transcript.text }];
+  const clean = rawSegments.filter((seg) => seg.text.trim().length > 0);
+  if (clean.length === 0 && transcript.text.trim()) {
+    return splitTranscriptText(transcript.text, count);
+  }
+  if (clean.length <= count) return clean;
+  const grouped: Array<{ startSec: number; endSec: number; text: string }> = [];
+  for (let i = 0; i < count; i++) {
+    const start = Math.floor((i * clean.length) / count);
+    const end = Math.floor(((i + 1) * clean.length) / count);
+    const parts = clean.slice(start, Math.max(start + 1, end));
+    grouped.push({
+      startSec: parts[0]?.startSec ?? i * 3,
+      endSec: parts[parts.length - 1]?.endSec ?? (i + 1) * 3,
+      text: parts.map((p) => p.text.trim()).join(' '),
+    });
+  }
+  return grouped;
+}
+
+function splitTranscriptText(text: string, count: number): Array<{ startSec: number; endSec: number; text: string }> {
+  const clauses = text.split(/(?<=[。！？!?；;])/).map((s) => s.trim()).filter(Boolean);
+  const source = clauses.length > 0 ? clauses : [text.trim()];
+  const grouped: string[] = [];
+  for (let i = 0; i < Math.min(count, source.length); i++) {
+    const start = Math.floor((i * source.length) / Math.min(count, source.length));
+    const end = Math.floor(((i + 1) * source.length) / Math.min(count, source.length));
+    grouped.push(source.slice(start, Math.max(start + 1, end)).join(''));
+  }
+  return grouped.map((part, i) => ({ startSec: i * 3, endSec: (i + 1) * 3, text: part }));
+}
+
+function frameTextForCaptionMode(text: string, captionMode: string, index: number): string {
+  if (captionMode.startsWith('不上')) return index === 0 ? '核心观点' : `要点 ${index + 1}`;
+  if (captionMode.startsWith('关键句')) {
+    const first = text.split(/[。！？!?；;]/).map((s) => s.trim()).find(Boolean);
+    return (first ?? text).slice(0, 72);
+  }
+  return text;
+}
+
+function totalTranscriptDuration(transcript: import('@html-video/core').TranscriptDocument): number {
+  if (transcript.segments.length === 0) return Math.max(3, transcript.text.length / 8);
+  const first = transcript.segments[0];
+  const last = transcript.segments[transcript.segments.length - 1];
+  return Math.max(0, (last?.endSec ?? 0) - (first?.startSec ?? 0));
+}
+
+function localTranscriptFrameHtml(args: {
+  index: number;
+  total: number;
+  text: string;
+  synopsis: string;
+  type?: string;
+  style?: string;
+  captionMode?: string;
+}): string {
+  const safeText = escapeHtml(args.text);
+  const safeSynopsis = escapeHtml(args.synopsis);
+  const safeType = escapeHtml(args.type ?? '口播字幕');
+  const style = args.style ?? '现代科技发布会';
+  const palette = localFramePalette(style);
+  const kicker = args.index === 0
+    ? 'OPENING'
+    : args.index === args.total - 1
+      ? 'TAKEAWAY'
+      : `POINT ${args.index + 1}`;
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Talking-head transcript frame</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 18% 24%, ${palette.glow}, transparent 30%),
+        linear-gradient(135deg, ${palette.bgA} 0%, ${palette.bgB} 48%, ${palette.bgC} 100%);
+      color: ${palette.text};
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding: 92px 112px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 34px;
+    }
+    .kicker {
+      width: max-content;
+      border: 1px solid rgba(255,255,255,.34);
+      padding: 9px 14px;
+      font-size: 22px;
+      letter-spacing: .18em;
+      font-weight: 700;
+      color: ${palette.accentSoft};
+    }
+    h1 {
+      max-width: 1160px;
+      margin: 0;
+      font-size: 72px;
+      line-height: 1.12;
+      letter-spacing: 0;
+      font-weight: 780;
+      text-wrap: balance;
+      text-shadow: 0 18px 50px rgba(0,0,0,.32);
+      animation: rise .75s cubic-bezier(.2,.8,.2,1) both;
+    }
+    .synopsis {
+      max-width: 920px;
+      color: ${palette.muted};
+      font-size: 24px;
+      line-height: 1.5;
+    }
+    .type {
+      position: absolute;
+      right: 112px;
+      top: 82px;
+      color: ${palette.muted};
+      font-size: 20px;
+      font-weight: 650;
+    }
+    .count {
+      position: absolute;
+      left: 112px;
+      bottom: 78px;
+      color: ${palette.muted};
+      font: 600 18px ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .line {
+      position: absolute;
+      right: 112px;
+      bottom: 88px;
+      width: 420px;
+      height: 2px;
+      background: linear-gradient(90deg, ${palette.accent}, rgba(255,255,255,.15));
+    }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(28px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <div class="type">${safeType}</div>
+    <div class="kicker">${kicker}</div>
+    <h1 data-hv-text="headline">${safeText}</h1>
+    <div class="synopsis" data-hv-text="context">${safeSynopsis}</div>
+    <div class="count">${String(args.index + 1).padStart(2, '0')} / ${String(args.total).padStart(2, '0')}</div>
+    <div class="line"></div>
+  </main>
+</body>
+</html>`;
+}
+
+function localFramePalette(style: string): {
+  bgA: string;
+  bgB: string;
+  bgC: string;
+  text: string;
+  muted: string;
+  accent: string;
+  accentSoft: string;
+  glow: string;
+} {
+  if (/生活|温暖/.test(style)) {
+    return {
+      bgA: '#12231d',
+      bgB: '#315446',
+      bgC: '#f4c36f',
+      text: '#fffaf0',
+      muted: 'rgba(255,250,240,.72)',
+      accent: '#f4a261',
+      accentSoft: '#ffd59b',
+      glow: 'rgba(244, 162, 97, .28)',
+    };
+  }
+  if (/数据|大字报/.test(style)) {
+    return {
+      bgA: '#101114',
+      bgB: '#263238',
+      bgC: '#e9f5ff',
+      text: '#f7fbff',
+      muted: 'rgba(247,251,255,.70)',
+      accent: '#00bcd4',
+      accentSoft: '#9be7f2',
+      glow: 'rgba(0, 188, 212, .25)',
+    };
+  }
+  if (/社媒|快闪/.test(style)) {
+    return {
+      bgA: '#141217',
+      bgB: '#342344',
+      bgC: '#ffcf5c',
+      text: '#fff8ec',
+      muted: 'rgba(255,248,236,.72)',
+      accent: '#ff4d6d',
+      accentSoft: '#ffc2cd',
+      glow: 'rgba(255, 77, 109, .25)',
+    };
+  }
+  return {
+    bgA: '#101114',
+    bgB: '#20252a',
+    bgC: '#f1e8dc',
+    text: '#fff8ef',
+    muted: 'rgba(255,248,239,.72)',
+    accent: '#ff7043',
+    accentSoft: '#ffd0b8',
+    glow: 'rgba(255, 112, 67, .22)',
+  };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function wantsLocalTranscriptFallback(text: string): boolean {
+  return /字幕|口播|transcript|talking[- ]?head|本地/i.test(text);
 }
 
 /** Spawn the agent, collect all stdout text, return when done. */

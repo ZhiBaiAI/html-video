@@ -14,9 +14,11 @@ import type {
   EngineId,
   FrameRecord,
   Project,
+  ProjectTalkingHeadAudioMode,
   ProjectStatus,
   TemplateMetadata,
   TemplateRef,
+  TranscriptDocument,
 } from './types/index.js';
 import {
   type ContentGraph,
@@ -136,6 +138,126 @@ export class ProjectOrchestrator {
     project.assets = project.assets.filter((a) => a.id !== assetId);
     await this.deps.projects.save(project);
     return project;
+  }
+
+  async setTalkingHead(
+    projectId: string,
+    videoAssetId: string,
+    opts: {
+      enabled?: boolean;
+      transcriptAssetId?: string;
+      srtAssetId?: string;
+      vttAssetId?: string;
+      widthPct?: number;
+      marginPx?: number;
+      shape?: 'circle' | 'rounded-rect';
+      radiusPx?: number;
+      audioMode?: ProjectTalkingHeadAudioMode;
+    } = {},
+  ): Promise<Project> {
+    const project = await this.deps.projects.load(projectId);
+    const asset = project.assets.find((a) => a.id === videoAssetId);
+    if (!asset || asset.type !== 'video') {
+      throw new HtmlVideoError('invalid-input', `Video asset ${videoAssetId} not found`);
+    }
+    project.talkingHead = {
+      enabled: opts.enabled ?? true,
+      videoAssetId,
+      ...(opts.transcriptAssetId !== undefined && { transcriptAssetId: opts.transcriptAssetId }),
+      ...(opts.srtAssetId !== undefined && { srtAssetId: opts.srtAssetId }),
+      ...(opts.vttAssetId !== undefined && { vttAssetId: opts.vttAssetId }),
+      audioMode: opts.audioMode ?? project.talkingHead?.audioMode ?? 'synthetic',
+      overlay: {
+        position: 'bottom-right',
+        widthPct: opts.widthPct ?? project.talkingHead?.overlay.widthPct ?? 15,
+        marginPx: opts.marginPx ?? project.talkingHead?.overlay.marginPx ?? 72,
+        shape: opts.shape ?? project.talkingHead?.overlay.shape ?? 'circle',
+        radiusPx: opts.radiusPx ?? project.talkingHead?.overlay.radiusPx ?? 9999,
+      },
+    };
+    await this.deps.projects.save(project);
+    return project;
+  }
+
+  async setTalkingHeadAudioMode(projectId: string, audioMode: ProjectTalkingHeadAudioMode): Promise<Project> {
+    const project = await this.deps.projects.load(projectId);
+    if (!project.talkingHead) {
+      throw new HtmlVideoError('invalid-input', 'Project has no talking-head video selected');
+    }
+    project.talkingHead.audioMode = audioMode;
+    await this.deps.projects.save(project);
+    return project;
+  }
+
+  async clearTalkingHead(projectId: string): Promise<Project> {
+    const project = await this.deps.projects.load(projectId);
+    delete project.talkingHead;
+    await this.deps.projects.save(project);
+    return project;
+  }
+
+  async transcribeTalkingHead(args: {
+    projectId: string;
+    videoAssetId: string;
+    model?: string;
+    language?: string;
+  }): Promise<{
+    project: Project;
+    transcript: TranscriptDocument;
+    transcriptPath: string;
+    srtPath?: string;
+    vttPath?: string;
+  }> {
+    let project = await this.setTalkingHead(args.projectId, args.videoAssetId);
+    const video = project.assets.find((a) => a.id === args.videoAssetId);
+    if (!video?.path) {
+      throw new HtmlVideoError('asset-not-found', `Video asset ${args.videoAssetId} has no file path`);
+    }
+    const projectDir = await this.deps.projects.ensureDir(args.projectId);
+    const out = await transcribeVideoWithLocalWhisper({
+      videoPath: video.path,
+      workDir: projectDir,
+      videoAssetId: args.videoAssetId,
+      model: args.model ?? 'tiny',
+      ...(args.language !== undefined && { language: args.language }),
+    });
+
+    const transcriptAsset = await this.deps.assets.addFileAsset(
+      args.projectId,
+      out.transcriptPath,
+      ['transcript'],
+      'local Whisper transcript',
+    );
+    const srtAsset = out.srtPath
+      ? await this.deps.assets.addFileAsset(args.projectId, out.srtPath, ['subtitle'], 'SRT subtitles')
+      : undefined;
+    const vttAsset = out.vttPath
+      ? await this.deps.assets.addFileAsset(args.projectId, out.vttPath, ['subtitle'], 'VTT subtitles')
+      : undefined;
+
+    project = await this.deps.projects.load(args.projectId);
+    for (const asset of [transcriptAsset, srtAsset, vttAsset].filter(Boolean) as Asset[]) {
+      if (!project.assets.find((a) => a.id === asset.id)) project.assets.push(asset);
+    }
+    project.talkingHead = {
+      ...(project.talkingHead ?? {
+        enabled: true,
+        videoAssetId: args.videoAssetId,
+        audioMode: 'synthetic' as const,
+        overlay: { position: 'bottom-right' as const, widthPct: 15, marginPx: 72, shape: 'circle' as const, radiusPx: 9999 },
+      }),
+      transcriptAssetId: transcriptAsset.id,
+      ...(srtAsset !== undefined && { srtAssetId: srtAsset.id }),
+      ...(vttAsset !== undefined && { vttAssetId: vttAsset.id }),
+    };
+    await this.deps.projects.save(project);
+    return {
+      project,
+      transcript: out.transcript,
+      transcriptPath: out.transcriptPath,
+      ...(out.srtPath !== undefined && { srtPath: out.srtPath }),
+      ...(out.vttPath !== undefined && { vttPath: out.vttPath }),
+    };
   }
 
   // ---------------- Template / variables ----------------
@@ -428,7 +550,16 @@ export class ProjectOrchestrator {
         fps: project.preferences.fps ?? 60,
       });
       const totalDur = ordered.reduce((s, f) => s + (f.durationSec || 0), 0);
-      await this.applySoundtrack(project, outputPath, totalDur, args.onProgress);
+      if (project.talkingHead?.enabled) {
+        await this.applyTalkingHead(project, outputPath, args.onProgress);
+        if (resolveTalkingHeadAudioMode(project.talkingHead.audioMode) === 'original') {
+          await this.applyTalkingHeadOriginalAudio(project, outputPath, args.onProgress);
+        } else {
+          await this.applySoundtrack(project, outputPath, totalDur, args.onProgress);
+        }
+      } else {
+        await this.applySoundtrack(project, outputPath, totalDur, args.onProgress);
+      }
       project.lastOutputMp4Path = outputPath;
       recordExport(project, outputPath);
       project.status = 'rendered';
@@ -461,7 +592,16 @@ export class ProjectOrchestrator {
         ...(args.signal !== undefined && { signal: args.signal }),
       },
     );
-    await this.applySoundtrack(project, outputPath, undefined, args.onProgress);
+    if (project.talkingHead?.enabled) {
+      await this.applyTalkingHead(project, outputPath, args.onProgress);
+      if (resolveTalkingHeadAudioMode(project.talkingHead.audioMode) === 'original') {
+        await this.applyTalkingHeadOriginalAudio(project, outputPath, args.onProgress);
+      } else {
+        await this.applySoundtrack(project, outputPath, undefined, args.onProgress);
+      }
+    } else {
+      await this.applySoundtrack(project, outputPath, undefined, args.onProgress);
+    }
     project.lastOutputMp4Path = outputPath;
     recordExport(project, outputPath);
     project.status = 'rendered';
@@ -640,9 +780,9 @@ export class ProjectOrchestrator {
   }
 
   /**
-   * If the project has a soundtrack (music and/or narration), mux it into the
+   * If the project has synthesized narration, mux it into the
    * just-rendered video at `outputPath`. Renders to a temp file then renames
-   * over the original. No-op when there's no soundtrack. Audio generation
+   * over the original. No-op when there's no narration. Audio generation
    * never depends on ffmpeg — only this export-time mux does.
    */
   private async applySoundtrack(
@@ -652,36 +792,90 @@ export class ProjectOrchestrator {
     onProgress?: (pct: number, stage: string) => void,
   ): Promise<void> {
     const st = project.soundtrack;
-    if (!st || (!st.musicAssetId && !st.narrationAssetId)) return;
+    if (!st?.narrationAssetId) return;
 
     const findPath = (id?: string): string | undefined =>
       id ? project.assets.find((a) => a.id === id)?.path : undefined;
-    const musicPath = findPath(st.musicAssetId);
     const narrationPath = findPath(st.narrationAssetId);
-    if (!musicPath && !narrationPath) return; // referenced assets are gone
+    if (!narrationPath) return; // referenced asset is gone
 
     onProgress?.(99, 'mixing audio');
     const { rename } = await import('node:fs/promises');
     const tmpOut = `${outputPath}.muxed.mp4`;
-    // MiniMax music is a fixed ~50s clip regardless of request; `-shortest`
-    // already trims it to the video length, but a hard cut sounds abrupt.
-    // Default a gentle fade-out (≤ a third of the clip, capped 1.5s) when the
-    // user hasn't set one and we know the video length.
-    const defaultFadeOut =
-      musicPath && videoDurationSec && videoDurationSec > 2
-        ? Math.min(1.5, videoDurationSec / 3)
-        : 0;
-    const fadeOutSec = st.fadeOutSec ?? defaultFadeOut;
     await muxAudioWithFfmpeg({
       videoPath: outputPath,
       outputPath: tmpOut,
-      ...(musicPath !== undefined && { musicPath }),
-      ...(narrationPath !== undefined && { narrationPath }),
-      ...(st.musicVolumeDb !== undefined && { musicVolumeDb: st.musicVolumeDb }),
+      narrationPath,
       ...(st.narrationVolumeDb !== undefined && { narrationVolumeDb: st.narrationVolumeDb }),
-      ...(st.fadeInSec !== undefined && { fadeInSec: st.fadeInSec }),
-      ...(fadeOutSec > 0 && { fadeOutSec }),
-      ...(videoDurationSec !== undefined && { videoDurationSec }),
+    });
+    await rename(tmpOut, outputPath);
+  }
+
+  private async applyTalkingHeadOriginalAudio(
+    project: Project,
+    outputPath: string,
+    onProgress?: (pct: number, stage: string) => void,
+  ): Promise<void> {
+    const th = project.talkingHead;
+    if (!th?.enabled) return;
+    const videoPath = project.assets.find((a) => a.id === th.videoAssetId)?.path;
+    if (!videoPath) return;
+    onProgress?.(99, 'using original talking-head audio');
+    const { rename } = await import('node:fs/promises');
+    const tmpOut = `${outputPath}.source-audio.mp4`;
+    await muxOriginalAudioWithFfmpeg({
+      videoPath: outputPath,
+      audioSourcePath: videoPath,
+      outputPath: tmpOut,
+    });
+    await rename(tmpOut, outputPath);
+  }
+
+  private async applyTalkingHead(
+    project: Project,
+    outputPath: string,
+    onProgress?: (pct: number, stage: string) => void,
+  ): Promise<void> {
+    const th = project.talkingHead;
+    if (!th?.enabled) return;
+    const videoPath = project.assets.find((a) => a.id === th.videoAssetId)?.path;
+    if (!videoPath) {
+      throw new HtmlVideoError('asset-not-found', `Talking-head video asset ${th.videoAssetId} has no file path`);
+    }
+    onProgress?.(99, 'overlaying talking-head video');
+    const { readFile, rename, writeFile } = await import('node:fs/promises');
+    const tmpOut = `${outputPath}.talking-head.mp4`;
+    const outputWidth = project.preferences.resolution?.width ?? 1920;
+    const outputHeight = project.preferences.resolution?.height ?? 1080;
+    const overlayWidthPct = th.overlay.widthPct ?? 15;
+    const overlayMarginPx = th.overlay.marginPx ?? 72;
+    let subtitlesPath: string | undefined;
+    const transcriptPath = project.assets.find((a) => a.id === th.transcriptAssetId)?.path;
+    if (transcriptPath && await ffmpegSupportsFilter('subtitles')) {
+      try {
+        const transcript = JSON.parse(await readFile(transcriptPath, 'utf8')) as TranscriptDocument;
+        if (transcript.segments.length > 0) {
+          subtitlesPath = `${outputPath}.talking-head.ass`;
+          await writeFile(subtitlesPath, renderTalkingHeadAssSubtitles(transcript, {
+            width: outputWidth,
+            height: outputHeight,
+            overlayWidth: Math.max(150, Math.round(outputWidth * (overlayWidthPct / 100))),
+            marginPx: overlayMarginPx,
+          }), 'utf8');
+        }
+      } catch {
+        // Subtitle burn-in is best-effort; export should still succeed with PiP/audio.
+      }
+    }
+    await overlayTalkingHeadWithFfmpeg({
+      baseVideoPath: outputPath,
+      talkingHeadPath: videoPath,
+      outputPath: tmpOut,
+      outputWidth,
+      widthPct: overlayWidthPct,
+      marginPx: overlayMarginPx,
+      shape: th.overlay.shape ?? 'circle',
+      ...(subtitlesPath !== undefined && { subtitlesPath }),
     });
     await rename(tmpOut, outputPath);
   }
@@ -821,11 +1015,8 @@ async function concatFramesWithFfmpeg(
 }
 
 /**
- * Mix a background-music track and/or a narration track into a (silent) video
- * file, writing the result to `outputPath`. Video is stream-copied (no
- * re-encode); audio is encoded to AAC. Music is ducked under narration via a
- * volume offset, optional fade in/out is applied to the music, and `-shortest`
- * keeps the result aligned to the video length.
+ * Mix a synthesized narration track into a video file, writing the result to
+ * `outputPath`. Video is stream-copied (no re-encode); audio is encoded to AAC.
  *
  * `videoPath` and `outputPath` must differ. Throws HtmlVideoError on ffmpeg
  * failure; a missing ffmpeg yields the same friendly hint as concat.
@@ -833,61 +1024,17 @@ async function concatFramesWithFfmpeg(
 async function muxAudioWithFfmpeg(args: {
   videoPath: string;
   outputPath: string;
-  musicPath?: string;
-  narrationPath?: string;
-  musicVolumeDb?: number;
+  narrationPath: string;
   narrationVolumeDb?: number;
-  fadeInSec?: number;
-  fadeOutSec?: number;
-  videoDurationSec?: number;
 }): Promise<void> {
   const { spawn } = await import('node:child_process');
-  const hasMusic = !!args.musicPath;
-  const hasNarration = !!args.narrationPath;
-  if (!hasMusic && !hasNarration) return; // nothing to mix
-
-  const musicVol = args.musicVolumeDb ?? -18;
   const narrVol = args.narrationVolumeDb ?? 0;
-  const fadeIn = args.fadeInSec ?? 0;
-  const fadeOut = args.fadeOutSec ?? 0;
-
-  // Inputs: [0] video, then music / narration in order.
-  const inputs: string[] = ['-i', args.videoPath];
-  let musicIdx = -1;
-  let narrIdx = -1;
-  let next = 1;
-  if (hasMusic) { inputs.push('-i', args.musicPath!); musicIdx = next++; }
-  if (hasNarration) { inputs.push('-i', args.narrationPath!); narrIdx = next++; }
-
-  // Build a filter graph producing a single [aout] label.
-  const filters: string[] = [];
-  const mixLabels: string[] = [];
-  if (hasMusic) {
-    let chain = `[${musicIdx}:a]volume=${musicVol}dB`;
-    if (fadeIn > 0) chain += `,afade=t=in:st=0:d=${fadeIn}`;
-    // Fade-out only when we know where the end is.
-    if (fadeOut > 0 && args.videoDurationSec && args.videoDurationSec > fadeOut) {
-      chain += `,afade=t=out:st=${(args.videoDurationSec - fadeOut).toFixed(2)}:d=${fadeOut}`;
-    }
-    chain += '[bg]';
-    filters.push(chain);
-    mixLabels.push('[bg]');
-  }
-  if (hasNarration) {
-    filters.push(`[${narrIdx}:a]volume=${narrVol}dB[vo]`);
-    mixLabels.push('[vo]');
-  }
-  if (mixLabels.length === 2) {
-    filters.push(`${mixLabels[0]}${mixLabels[1]}amix=inputs=2:duration=longest:dropout_transition=0[aout]`);
-  } else {
-    // single source → relabel to [aout]
-    filters.push(`${mixLabels[0]}anull[aout]`);
-  }
 
   const ffArgs = [
     '-y',
-    ...inputs,
-    '-filter_complex', filters.join(';'),
+    '-i', args.videoPath,
+    '-i', args.narrationPath,
+    '-filter_complex', `[1:a]volume=${narrVol}dB[aout]`,
     '-map', '0:v',
     '-map', '[aout]',
     '-c:v', 'copy',
@@ -916,6 +1063,340 @@ async function muxAudioWithFfmpeg(args: {
       else reject(new HtmlVideoError('render-failed', `ffmpeg audio mux exited with code ${code}: ${stderr.slice(-2000)}`));
     });
   });
+}
+
+async function muxOriginalAudioWithFfmpeg(args: {
+  videoPath: string;
+  audioSourcePath: string;
+  outputPath: string;
+}): Promise<void> {
+  await runFfmpeg([
+    '-y',
+    '-i', args.videoPath,
+    '-i', args.audioSourcePath,
+    '-map', '0:v',
+    '-map', '1:a?',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-b:a', '192k',
+    '-movflags', '+faststart',
+    args.outputPath,
+  ], 'talking-head original audio mux');
+}
+
+function resolveTalkingHeadAudioMode(mode: ProjectTalkingHeadAudioMode | undefined): 'synthetic' | 'original' {
+  return mode === 'original' ? 'original' : 'synthetic';
+}
+
+async function overlayTalkingHeadWithFfmpeg(args: {
+  baseVideoPath: string;
+  talkingHeadPath: string;
+  outputPath: string;
+  outputWidth: number;
+  widthPct: number;
+  marginPx: number;
+  shape: 'circle' | 'rounded-rect';
+  subtitlesPath?: string;
+}): Promise<void> {
+  const runOverlay = (subtitlesPath?: string, label = 'talking-head overlay') => runFfmpeg([
+    '-y',
+    '-i', args.baseVideoPath,
+    '-i', args.talkingHeadPath,
+    '-filter_complex', buildTalkingHeadOverlayFilter({ ...args, subtitlesPath }),
+    '-map', '[vout]',
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',
+    '-movflags', '+faststart',
+    args.outputPath,
+  ], label);
+
+  try {
+    await runOverlay(args.subtitlesPath);
+  } catch (error) {
+    if (!args.subtitlesPath || !isSubtitleFilterFailure(error)) throw error;
+    await runOverlay(undefined, 'talking-head overlay without subtitles');
+  }
+}
+
+function buildTalkingHeadOverlayFilter(args: {
+  outputWidth: number;
+  widthPct: number;
+  marginPx: number;
+  shape: 'circle' | 'rounded-rect';
+  subtitlesPath?: string;
+}): string {
+  const overlayWidth = Math.max(150, Math.round(args.outputWidth * (args.widthPct / 100)));
+  const margin = Math.max(0, Math.round(args.marginPx));
+  const baseLabel = args.subtitlesPath ? 'baseSub' : '0:v';
+  const subtitleFilter = args.subtitlesPath
+    ? `[0:v]subtitles=filename='${escapeFfmpegFilterPath(args.subtitlesPath)}'[baseSub];`
+    : '';
+  const overlayFilter = args.shape === 'circle'
+    ? [
+        `[1:v]scale=${overlayWidth}:${overlayWidth}:force_original_aspect_ratio=increase,crop=${overlayWidth}:${overlayWidth},setsar=1,format=rgb24[th0]`,
+        `nullsrc=s=${overlayWidth}x${overlayWidth},format=gray,geq=lum='if(lte((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2),(W/2)*(W/2)),255,0)'[mask]`,
+        `[th0][mask]alphamerge[th]`,
+        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:eof_action=pass[vout]`,
+      ].join(';')
+    : [
+        `[1:v]scale=${overlayWidth}:-2,format=rgba[th]`,
+        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:eof_action=pass[vout]`,
+      ].join(';');
+  return `${subtitleFilter}${overlayFilter}`;
+}
+
+function isSubtitleFilterFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("No such filter: 'subtitles'")
+    || message.includes('No option name near')
+    || message.includes('Error parsing filterchain')
+    || message.includes('Error parsing a filter description');
+}
+
+function renderTalkingHeadAssSubtitles(
+  transcript: TranscriptDocument,
+  args: { width: number; height: number; overlayWidth: number; marginPx: number },
+): string {
+  const fontSize = Math.max(34, Math.round(args.width * 0.03));
+  const marginL = Math.max(64, Math.round(args.width * 0.05));
+  const marginR = Math.max(marginL, args.overlayWidth + args.marginPx + 56);
+  const marginV = Math.max(72, Math.round(args.height * 0.075));
+  const events = transcript.segments
+    .filter((seg) => seg.text.trim().length > 0 && seg.endSec > seg.startSec)
+    .map((seg) => `Dialogue: 0,${assTime(seg.startSec)},${assTime(seg.endSec)},Default,,0,0,0,,${escapeAssText(wrapSubtitleText(seg.text.trim()))}`)
+    .join('\n');
+  return `[Script Info]
+ScriptType: v4.00+
+PlayResX: ${args.width}
+PlayResY: ${args.height}
+ScaledBorderAndShadow: yes
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
+Style: Default,Arial,${fontSize},&H00FFFFFF,&H000000FF,&HCC000000,&H99000000,-1,0,0,0,100,100,0,0,1,4,1.5,2,${marginL},${marginR},${marginV},1
+
+[Events]
+Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+${events}
+`;
+}
+
+function assTime(seconds: number): string {
+  const safe = Math.max(0, seconds);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = Math.floor(safe % 60);
+  const centis = Math.floor((safe - Math.floor(safe)) * 100);
+  return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(centis).padStart(2, '0')}`;
+}
+
+function wrapSubtitleText(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= 24) return compact;
+  const splitAt = Math.min(26, Math.max(16, Math.floor(compact.length / 2)));
+  return `${compact.slice(0, splitAt)}\n${compact.slice(splitAt)}`;
+}
+
+function escapeAssText(text: string): string {
+  return text
+    .replace(/[{}]/g, '')
+    .replace(/\n/g, '\\N');
+}
+
+function escapeFfmpegFilterPath(path: string): string {
+  return path
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'");
+}
+
+const ffmpegFilterSupportCache = new Map<string, Promise<boolean>>();
+
+function ffmpegSupportsFilter(name: string): Promise<boolean> {
+  const cached = ffmpegFilterSupportCache.get(name);
+  if (cached) return cached;
+  const result = new Promise<boolean>((resolveFn) => {
+    import('node:child_process')
+      .then(({ spawn }) => {
+        const proc = spawn('ffmpeg', ['-hide_banner', '-filters'], { stdio: ['ignore', 'pipe', 'pipe'] });
+        let output = '';
+        proc.stdout.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
+        proc.stderr.on('data', (chunk: Buffer) => { output += chunk.toString('utf8'); });
+        proc.on('error', () => resolveFn(false));
+        proc.on('exit', (code: number | null) => {
+          if (code !== 0) {
+            resolveFn(false);
+            return;
+          }
+          resolveFn(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(output));
+        });
+      })
+      .catch(() => resolveFn(false));
+  });
+  ffmpegFilterSupportCache.set(name, result);
+  return result;
+}
+
+async function transcribeVideoWithLocalWhisper(args: {
+  videoPath: string;
+  workDir: string;
+  videoAssetId: string;
+  model: string;
+  language?: string;
+}): Promise<{
+  transcript: TranscriptDocument;
+  transcriptPath: string;
+  srtPath?: string;
+  vttPath?: string;
+}> {
+  const { mkdir, readFile, writeFile } = await import('node:fs/promises');
+  const { existsSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { spawn } = await import('node:child_process');
+
+  const outDir = join(args.workDir, 'transcripts');
+  await mkdir(outDir, { recursive: true });
+  const base = `talking-head-${args.videoAssetId.slice(0, 10)}`;
+  const wavPath = join(outDir, `${base}.wav`);
+  await runFfmpeg([
+    '-y',
+    '-i', args.videoPath,
+    '-vn',
+    '-ac', '1',
+    '-ar', '16000',
+    '-c:a', 'pcm_s16le',
+    wavPath,
+  ], 'extract audio for Whisper');
+
+  const whisperArgs = [
+    wavPath,
+    '--model', args.model,
+    '--output_dir', outDir,
+    '--output_format', 'all',
+    '--fp16', 'False',
+  ];
+  if (args.language) whisperArgs.push('--language', args.language);
+
+  await new Promise<void>((resolveFn, reject) => {
+    const proc = spawn('whisper', whisperArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    proc.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        reject(new HtmlVideoError(
+          'render-failed',
+          'Local Whisper CLI not found on PATH. Install openai-whisper and make sure `whisper` is available.',
+        ));
+      } else {
+        reject(err);
+      }
+    });
+    proc.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (code === 0) resolveFn();
+      else {
+        const reason = signal ? `signal ${signal}` : `code ${code}`;
+        reject(new HtmlVideoError('render-failed', `whisper exited with ${reason}: ${stderr.slice(-2000)}`));
+      }
+    });
+  });
+
+  const rawJsonPath = join(outDir, `${base}.json`);
+  if (!existsSync(rawJsonPath)) {
+    throw new HtmlVideoError('render-failed', `Whisper did not produce JSON output at ${rawJsonPath}`);
+  }
+  const raw = JSON.parse(await readFile(rawJsonPath, 'utf8')) as {
+    text?: string;
+    language?: string;
+    segments?: Array<{
+      start?: number;
+      end?: number;
+      text?: string;
+      words?: Array<{ start?: number; end?: number; word?: string; text?: string }>;
+    }>;
+  };
+  const transcript: TranscriptDocument = {
+    text: String(raw.text ?? '').trim(),
+    ...(typeof raw.language === 'string' && { language: raw.language }),
+    segments: (raw.segments ?? []).map((seg) => ({
+      startSec: Number(seg.start ?? 0),
+      endSec: Number(seg.end ?? 0),
+      text: String(seg.text ?? '').trim(),
+      ...(Array.isArray(seg.words) && {
+        words: seg.words.map((w) => ({
+          startSec: Number(w.start ?? 0),
+          endSec: Number(w.end ?? 0),
+          text: String(w.word ?? w.text ?? '').trim(),
+        })),
+      }),
+    })),
+    source: {
+      kind: 'local-whisper',
+      model: args.model,
+      videoAssetId: args.videoAssetId,
+    },
+  };
+  const transcriptPath = join(outDir, `${base}.transcript.json`);
+  await writeFile(transcriptPath, JSON.stringify(transcript, null, 2), 'utf8');
+  const srtPath = existsSync(join(outDir, `${base}.srt`)) ? join(outDir, `${base}.srt`) : undefined;
+  const vttPath = existsSync(join(outDir, `${base}.vtt`)) ? join(outDir, `${base}.vtt`) : undefined;
+  return {
+    transcript,
+    transcriptPath,
+    ...(srtPath !== undefined && { srtPath }),
+    ...(vttPath !== undefined && { vttPath }),
+  };
+}
+
+async function runFfmpeg(args: string[], label: string): Promise<void> {
+  const { spawn } = await import('node:child_process');
+  await new Promise<void>((resolveFn, reject) => {
+    const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    proc.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') {
+        reject(new HtmlVideoError(
+          'render-failed',
+          'ffmpeg not found on PATH. Install with `brew install ffmpeg` (macOS) or your platform equivalent.',
+        ));
+      } else {
+        reject(err);
+      }
+    });
+    proc.on('exit', (code: number | null) => {
+      if (code === 0) resolveFn();
+      else reject(new HtmlVideoError('render-failed', `ffmpeg ${label} exited with code ${code}: ${stderr.slice(-2000)}`));
+    });
+  });
+}
+
+/**
+ * Probe the real playback duration (seconds) of an audio/video file with
+ * ffprobe. Returns NaN if ffprobe is unavailable or the file has no duration,
+ * so callers can fall back to a heuristic (e.g. chars-per-second) instead of
+ * crashing. Mirrors {@link runFfmpeg}'s spawn + ENOENT handling.
+ */
+export async function probeMediaDurationSec(path: string): Promise<number> {
+  const { spawn } = await import('node:child_process');
+  const stdout = await new Promise<string>((resolveFn, reject) => {
+    // ffprobe prints a key=duration=NN.NNNNNN line to stdout.
+    const proc = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', path], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    let stderr = '';
+    proc.stdout.on('data', (chunk: Buffer) => { out += chunk.toString('utf8'); });
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    proc.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') resolveFn(''); // ffprobe missing → NaN downstream
+      else reject(err);
+    });
+    proc.on('exit', (code: number | null) => {
+      if (code === 0) resolveFn(out);
+      else resolveFn(''); // treat any probe failure as "unknown" → fall back
+    });
+  });
+  const n = Number.parseFloat(stdout.trim());
+  return Number.isFinite(n) ? n : NaN;
 }
 
 // ---------------------------------------------------------------------------
@@ -951,4 +1432,3 @@ function downgradeStatus(current: ProjectStatus, target: ProjectStatus): Project
   if (target === 'draft') return 'draft';
   return current;
 }
-

@@ -236,7 +236,10 @@ export interface TemplateMetadata {
   spec_version: 1;
   id: string;
   name: string;
+  name_zh?: string;
   description: string;
+  description_zh?: string;
+  description_en?: string;
   engine: EngineId;
   engine_version: string;
   source_entry: string;
@@ -369,31 +372,78 @@ export interface FrameRecord {
 }
 
 /**
- * v0.9: project-level soundtrack — one background music track + one narration
- * track mixed into the exported MP4. Both reference an entry in `assets[]`
- * (type 'audio'); this struct only holds the ids + mix preferences, so the
- * audio bytes live in the normal asset store. Per-frame audio is a v2 concern.
+ * Project-level synthesized narration mixed into the exported MP4. It
+ * references an entry in `assets[]` (type 'audio'); this struct only holds the
+ * ids + mix preferences, so the audio bytes live in the normal asset store.
  */
 export interface ProjectSoundtrack {
-  /** asset.id of the background-music track (type 'audio'), if generated */
+  /** Legacy: old projects may contain this, but export ignores it. */
   musicAssetId?: string;
   /** asset.id of the narration / voiceover track, if generated */
   narrationAssetId?: string;
-  /** Background-music gain in dB applied at mux time (default -18, pushed under voice) */
+  /** Legacy: old projects may contain this, but export ignores it. */
   musicVolumeDb?: number;
   /** Narration gain in dB (default 0) */
   narrationVolumeDb?: number;
-  /** Last music style prompt used — kept so the UI can show / re-run it */
+  /** Legacy: old projects may contain this, but export ignores it. */
   musicPrompt?: string;
   /** Last narration text used (the stitched full script) */
   narrationText?: string;
   /** Per-frame narration: { [graphNodeId]: line }. The UI edits/shows narration
    *  per selected frame; narrationText is these stitched in frame order. */
   narrationByFrame?: Record<string, string>;
-  /** Optional music fade-in seconds at the start of the video */
+  /** Legacy: old projects may contain this, but export ignores it. */
   fadeInSec?: number;
-  /** Optional music fade-out seconds at the end of the video */
+  /** Legacy: old projects may contain this, but export ignores it. */
   fadeOutSec?: number;
+}
+
+export interface TranscriptWord {
+  startSec: number;
+  endSec: number;
+  text: string;
+}
+
+export interface TranscriptSegment {
+  startSec: number;
+  endSec: number;
+  text: string;
+  words?: TranscriptWord[];
+}
+
+export interface TranscriptDocument {
+  text: string;
+  language?: string;
+  segments: TranscriptSegment[];
+  source: {
+    kind: 'local-whisper';
+    model?: string;
+    videoAssetId: string;
+  };
+}
+
+export type ProjectTalkingHeadAudioMode =
+  /** Use the generated/cloned narration track stored in project.soundtrack. */
+  | 'synthetic'
+  /** Use the original audio track from the uploaded talking-head video. */
+  | 'original'
+  /** Deprecated legacy value from the first talking-head prototype; treated as synthetic. */
+  | 'source';
+
+export interface ProjectTalkingHead {
+  enabled: boolean;
+  videoAssetId: string;
+  transcriptAssetId?: string;
+  srtAssetId?: string;
+  vttAssetId?: string;
+  audioMode: ProjectTalkingHeadAudioMode;
+  overlay: {
+    position: 'bottom-right';
+    widthPct: number;
+    marginPx: number;
+    shape?: 'circle' | 'rounded-rect';
+    radiusPx?: number;
+  };
 }
 
 export interface Project {
@@ -432,8 +482,14 @@ export interface Project {
    * Empty for single-frame fast-path projects.
    */
   frames?: FrameRecord[];
-  /** v0.9: optional background music + narration mixed into the export. */
+  /** Optional synthesized narration mixed into the export. */
   soundtrack?: ProjectSoundtrack;
+  /**
+   * Uploaded talking-head source mode: use a local Whisper transcript as source
+   * material, then overlay the source video + audio onto export. Mutually
+   * exclusive with soundtrack at export time; the stored soundtrack is kept.
+   */
+  talkingHead?: ProjectTalkingHead;
   createdAt: string;
   updatedAt: string;
 }

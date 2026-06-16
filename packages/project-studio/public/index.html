@@ -119,6 +119,12 @@
     box-shadow: inset 0 -1px 0 rgba(0,0,0,.08), 0 4px 10px rgba(201, 100, 66, .18); }
   .toolbar .export-btn:hover:not(:disabled) { background: var(--accent-hover); }
   .toolbar .export-btn:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
+  /* One-click narrate-to-video — secondary, sits left of Export. */
+  .toolbar .narrate-btn { background: var(--bg); border: 1px solid var(--accent);
+    color: var(--accent); padding: 7px 16px; border-radius: var(--radius-sm);
+    font-weight: 500; cursor: pointer; font-size: 12.5px; transition: all .15s; }
+  .toolbar .narrate-btn:hover:not(:disabled) { background: var(--accent-soft); }
+  .toolbar .narrate-btn:disabled { opacity: .35; cursor: not-allowed; }
   /* Top-bar external links + settings gear — sit on the right, before the gear. */
   .toolbar .toolbar-links { gap: 2px; margin-right: 4px; }
   .toolbar .tb-link { display: inline-flex; align-items: center; gap: 6px;
@@ -229,6 +235,14 @@
   .voice-clone-settings .panel-sub { margin: -6px 0 2px; }
   .voice-clone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .voice-clone-wide { grid-column: 1 / -1; }
+  .voice-record-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .voice-record-box button { padding: 8px 16px; border-radius: var(--radius-sm);
+    cursor: pointer; font-size: 12.5px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); }
+  .voice-record-box .primary-action { background: var(--accent); border-color: var(--accent);
+    color: var(--accent-fg); font-weight: 500; }
+  .voice-record-box .audio-save-state { font-size: 11.5px; color: var(--text-muted);
+    font-family: var(--font-mono); }
   #clone-preview audio { width: 100%; height: 32px; }
   .voice-library { display: flex; flex-direction: column; gap: 8px; }
   .voice-library-empty { border: 1px dashed var(--border); border-radius: var(--radius-sm);
@@ -765,6 +779,38 @@
     font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
     color: var(--text); flex: 1; }
 
+  /* ===== Narrate-to-video modal ===== */
+  .narrate-modal .modal.narrate { gap: 4px; }
+  .narrate-modal .narrate-sub { font-size: 12.5px; color: var(--text-muted);
+    margin: -6px 0 12px; line-height: 1.45; }
+  .narrate-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .narrate-tab { background: var(--bg); border: 1px solid var(--border);
+    color: var(--text-muted); padding: 6px 14px; border-radius: var(--radius-sm);
+    cursor: pointer; font: inherit; font-size: 12px; }
+  .narrate-tab:hover { color: var(--text); }
+  .narrate-tab.active { background: var(--accent-soft); color: var(--accent);
+    border-color: var(--accent); }
+  .narrate-input, .narrate-topic { width: 100%; background: var(--bg);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text); padding: 10px 12px; font: inherit; font-size: 13px;
+    resize: vertical; min-height: 120px; }
+  .narrate-topic { min-height: 0; padding: 9px 12px; }
+  .narrate-input:focus, .narrate-topic:focus { outline: none; border-color: var(--accent); }
+  .narrate-field { display: flex; align-items: center; gap: 10px; margin-top: 12px;
+    font-size: 12px; color: var(--text-muted); }
+  .narrate-field select { flex: 1; }
+  .narrate-progress { margin-top: 14px; padding: 12px 14px; border-radius: var(--radius);
+    background: var(--bg-subtle); font-size: 12.5px; color: var(--text);
+    border: 1px solid var(--border); line-height: 1.6; max-height: 160px; overflow: auto; }
+  .narrate-progress .err { color: var(--red); }
+  .narrate-progress .ok { color: var(--green); }
+  .narrate-foot { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
+  .narrate-foot .primary { background: var(--accent); color: var(--accent-fg);
+    border: 0; padding: 9px 20px; border-radius: var(--radius-sm); font: inherit;
+    font-weight: 500; cursor: pointer; }
+  .narrate-foot .primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .narrate-foot .primary:disabled { opacity: .4; cursor: not-allowed; }
+
   .preview-stage { padding: 22px; overflow: auto; display: flex;
     align-items: center; justify-content: center; min-height: 0; }
   /* aspect-ratio + max-width are set inline per project resolution (16:9 / 9:16
@@ -813,24 +859,34 @@
   .right-footer .reload-btn:hover { border-color: var(--accent); }
 
   /* ===== Soundtrack panel ===== */
-  .soundtrack-panel { border-top: 1px solid var(--border); background: var(--bg-panel);
+  .soundtrack-panel,
+  .talking-panel { border-top: 1px solid var(--border); background: var(--bg-panel);
     max-height: 42vh; overflow-y: auto; }
   /* Prominent, clearly-clickable collapsed bar (collapsed by default so it
      never crowds the preview). */
-  .soundtrack-panel > summary { padding: 13px 22px; cursor: pointer; font-size: 13px;
+  .soundtrack-panel > summary,
+  .talking-panel > summary { padding: 13px 22px; cursor: pointer; font-size: 13px;
     font-weight: 600; color: var(--text); user-select: none; list-style: none;
     display: flex; align-items: center; gap: 10px;
     background: var(--accent-soft); border: 1px dashed var(--accent);
     border-radius: var(--radius-sm); margin: 8px 16px; transition: background .12s, box-shadow .12s; }
-  .soundtrack-panel > summary::-webkit-details-marker { display: none; }
-  .soundtrack-panel > summary::after { content: '⌄'; margin-left: auto; font-size: 15px;
+  .soundtrack-panel > summary::-webkit-details-marker,
+  .talking-panel > summary::-webkit-details-marker { display: none; }
+  .soundtrack-panel > summary::after,
+  .talking-panel > summary::after { content: '⌄'; margin-left: auto; font-size: 15px;
     color: var(--accent); transition: transform .15s; flex: 0 0 auto; }
-  .soundtrack-panel[open] > summary::after { transform: rotate(180deg); }
-  .soundtrack-panel[open] > summary { border-style: solid; }
-  .soundtrack-panel > summary:hover { background: var(--accent); }
+  .soundtrack-panel[open] > summary::after,
+  .talking-panel[open] > summary::after { transform: rotate(180deg); }
+  .soundtrack-panel[open] > summary,
+  .talking-panel[open] > summary { border-style: solid; }
+  .soundtrack-panel > summary:hover,
+  .talking-panel > summary:hover { background: var(--accent); }
   .soundtrack-panel > summary:hover .st-summary-main,
-  .soundtrack-panel > summary:hover .st-summary-sub { color: var(--accent-fg); }
-  .soundtrack-panel > summary:hover::after { color: var(--accent-fg); }
+  .soundtrack-panel > summary:hover .st-summary-sub,
+  .talking-panel > summary:hover .st-summary-main,
+  .talking-panel > summary:hover .st-summary-sub { color: var(--accent-fg); }
+  .soundtrack-panel > summary:hover::after,
+  .talking-panel > summary:hover::after { color: var(--accent-fg); }
   .st-summary-main { flex: 0 0 auto; }
   .st-summary-sub { font-size: 11px; font-weight: 400; color: var(--text-muted); flex: 1; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -917,6 +973,17 @@
   .soundtrack-preview .st-track > span { font-size: 11px; color: var(--text-muted);
     min-width: 64px; }
   .soundtrack-preview audio { flex: 1; height: 32px; }
+  .talking-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .talking-audio-row { display: flex; align-items: center; gap: 8px; font-size: 11px;
+    color: var(--text-muted); }
+  .talking-audio-row select { min-width: 142px; }
+  .talking-preview { display: flex; flex-direction: column; gap: 8px; }
+  .talking-source { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; }
+  .talking-source video { width: 120px; aspect-ratio: 16/9; background: #000;
+    border-radius: var(--radius-sm); object-fit: cover; }
+  .talking-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .talking-meta b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .talking-meta span { color: var(--text-muted); font-size: 11px; }
 
   /* ===== Toast ===== */
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
@@ -1121,6 +1188,7 @@
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
 
+    <button class="narrate-btn" id="btn-narrate" disabled data-i18n="narrate.title">🎬 Narrate to video</button>
     <button class="export-btn" id="btn-export" disabled data-i18n="toolbar.export_mp4">Export MP4</button>
   </header>
 
@@ -1164,6 +1232,34 @@
       <button class="modal-close" id="gallery-close" data-i18n="gallery.close">Close</button>
     </div>
     <div class="gallery" id="gallery"></div>
+  </div>
+</div>
+
+<!-- One-click narrate-to-video modal -->
+<div class="modal-bg narrate-modal" id="narrate-modal">
+  <div class="modal narrate" style="max-width:640px;">
+    <div class="modal-head">
+      <h2 data-i18n="narrate.title">🎬 Narrate to video</h2>
+      <button class="modal-close" id="narrate-close" data-i18n="narrate.cancel">Cancel</button>
+    </div>
+    <p class="narrate-sub" data-i18n="narrate.subtitle">Paste a script or give a topic…</p>
+    <div class="narrate-tabs" role="tablist">
+      <button type="button" class="narrate-tab active" id="narrate-tab-script" data-i18n="narrate.tab_script">Script</button>
+      <button type="button" class="narrate-tab" id="narrate-tab-topic" data-i18n="narrate.tab_topic">Topic</button>
+    </div>
+    <textarea class="narrate-input" id="narrate-script" rows="6"
+      data-i18n-attr="placeholder:narrate.script_placeholder"></textarea>
+    <input class="narrate-topic" id="narrate-topic-input" type="text" hidden
+      data-i18n-attr="placeholder:narrate.topic_placeholder" />
+    <div class="narrate-field">
+      <label for="narrate-voice" data-i18n="narrate.voice_label">Voice</label>
+      <select id="narrate-voice" class="st-voice-select"></select>
+    </div>
+    <div class="narrate-progress" id="narrate-progress" hidden></div>
+    <div class="narrate-foot">
+      <div class="grow"></div>
+      <button class="primary" id="narrate-start" data-i18n="narrate.start">🎬 Start narrate</button>
+    </div>
   </div>
 </div>
 
@@ -1220,6 +1316,6 @@
   </div>
 </div>
 
-<script type="module" src="/app.js?v=0.7"></script>
+<script type="module" src="/app.js?v=0.12-talking-audio-mode"></script>
 </body>
 </html>

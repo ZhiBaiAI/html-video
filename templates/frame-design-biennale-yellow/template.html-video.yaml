@@ -1,0 +1,81 @@
+spec_version: 1
+id: frame-design-biennale-yellow
+name: 双年展黄 · Biennale Yellow
+name_zh: 双年展黄
+description: >
+  暖纸底色配太阳黄光晕，Instrument Serif 展示字、靛蓝墨色和 1px 发丝线，适合文化、展览、出版气质的视频。
+description_en: >
+  Warm parchment + solar yellow bloom, Instrument Serif display, indigo ink, 1px hairline rules
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: index.html
+
+category: presentation
+subcategory: frame-md-design-system
+tags: ["frame-md", "editorial", "parchment", "yellow", "serif", "culture"]
+
+best_for:
+  - "用作视频整体视觉模板 / frame.md design direction"
+  - "需要 双年展黄 风格的品牌、发布、报告或观点视频"
+  - "从 Hyperframes /design premade frames 选择视觉系统"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9"]
+  fps:
+    default: 30
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 3
+    max_sec: 30
+    default_sec: 10
+  alpha: false
+  audio: { supported: false }
+
+inputs:
+  schema:
+    type: object
+    properties: {}
+  examples: []
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+  notes: "Imported from Hyperframes public /design premade frame showcase (biennale-yellow); Hyperframes repository is Apache-2.0."
+
+provenance:
+  origin:
+    name: "Hyperframes /design premade frame: Biennale Yellow"
+    kind: studio
+    reference: "https://www.hyperframes.dev/design/biennale-yellow"
+  via_skill:
+    name: "Hyperframes FRAME.MD design templates"
+    author: "heygen-com / Hyperframes"
+    url: "https://www.hyperframes.dev/design"
+    license: "Apache-2.0"
+    source_file: "https://www.hyperframes.dev/design-templates/biennale-yellow/frame-showcase.html"
+  transformation: >
+    Imported as a first-class html-video selectable template with Chinese display metadata,
+    live iframe preview, poster fallback, and attribution. The source showcase HTML is preserved.
+
+assets_attribution:
+  - name: "Hyperframes design template Biennale Yellow"
+    license: "Apache-2.0"
+    author: "heygen-com / Hyperframes"
+    url: "https://www.hyperframes.dev/design/biennale-yellow"
+
+author:
+  name: "heygen-com / Hyperframes"
+  url: "https://github.com/heygen-com/hyperframes"
+
+version: "0.1.0"
+
+preview:
+  poster: poster.png

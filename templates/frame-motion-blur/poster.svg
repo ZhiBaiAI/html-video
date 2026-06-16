@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-label="Motion Blur template preview">
+  <rect width="1920" height="1080" fill="#06060a"/>
+  <g font-family="SF Mono, ui-monospace, Menlo, Monaco, Consolas, monospace">
+    <text x="72" y="68" fill="#3a3a4a" font-size="22" letter-spacing="8">MOTION BLUR</text>
+    <text x="1370" y="68" fill="#242432" font-size="18" letter-spacing="5">VELOCITY SHOWCASE</text>
+    <g opacity=".28" stroke="#151520" stroke-width="2">
+      <line x1="72" x2="1848" y1="80" y2="80"/>
+      <line x1="72" x2="1848" y1="264" y2="264"/>
+      <line x1="72" x2="1848" y1="448" y2="448"/>
+      <line x1="72" x2="1848" y1="632" y2="632"/>
+      <line x1="72" x2="1848" y1="816" y2="816"/>
+      <line x1="72" x2="1848" y1="1000" y2="1000"/>
+    </g>
+    <g font-weight="800">
+      <text x="72" y="185" fill="#ffffff" font-size="44">3.0</text>
+      <rect x="320" y="126" width="250" height="72" rx="36" fill="#60a5fa" opacity=".92"/>
+      <text x="650" y="198" fill="#3b82f6" font-size="72">DRIFT</text>
+      <text x="72" y="369" fill="#ffffff" font-size="44">1.5</text>
+      <rect x="520" y="310" width="310" height="72" rx="36" fill="#34d399" opacity=".88"/>
+      <text x="930" y="382" fill="#10b981" font-size="72">GLIDE</text>
+      <text x="72" y="553" fill="#ffffff" font-size="44">0.7</text>
+      <rect x="760" y="494" width="390" height="72" rx="36" fill="#c084fc" opacity=".82"/>
+      <text x="1240" y="566" fill="#a855f7" font-size="72">RUSH</text>
+      <text x="72" y="737" fill="#ffffff" font-size="44">0.35</text>
+      <rect x="1020" y="678" width="470" height="72" rx="36" fill="#fb923c" opacity=".76"/>
+      <text x="1540" y="750" fill="#f97316" font-size="72">BLAST</text>
+      <text x="72" y="921" fill="#ffffff" font-size="44">0.2</text>
+      <rect x="1210" y="862" width="560" height="72" rx="36" fill="#f87171" opacity=".72"/>
+      <text x="1360" y="950" fill="#ef4444" font-size="72" opacity=".88">WARP</text>
+    </g>
+    <g opacity=".18">
+      <rect x="270" y="126" width="250" height="72" rx="36" fill="#60a5fa"/>
+      <rect x="450" y="310" width="310" height="72" rx="36" fill="#34d399"/>
+      <rect x="650" y="494" width="390" height="72" rx="36" fill="#c084fc"/>
+      <rect x="860" y="678" width="470" height="72" rx="36" fill="#fb923c"/>
+      <rect x="990" y="862" width="560" height="72" rx="36" fill="#f87171"/>
+    </g>
+  </g>
+</svg>

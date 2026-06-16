@@ -1,20 +1,22 @@
-/** Alibaba Cloud Model Studio (Bailian) MiniMax TTS provider. */
+/** Alibaba Cloud Model Studio (Bailian) CosyVoice TTS provider. */
 
 import { HtmlVideoError } from './errors.js';
 import type { MinimaxAudioResult } from './minimax.js';
 
 const DEFAULT_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1';
-const TTS_PATH = '/services/aigc/multimodal-generation/generation';
+const TTS_PATH = '/services/audio/tts/SpeechSynthesizer';
+const CUSTOMIZATION_PATH = '/services/audio/tts/customization';
 const REQUEST_TIMEOUT_MS = 120_000;
 
-export const BAILIAN_MINIMAX_TTS_MODELS = [
-  'MiniMax/speech-02-turbo',
-  'MiniMax/speech-02-hd',
-  'MiniMax/speech-2.8-turbo',
-  'MiniMax/speech-2.8-hd',
+export const BAILIAN_COSYVOICE_TTS_MODELS = [
+  'cosyvoice-v3.5-plus',
+  'cosyvoice-v3.5-flash',
+  'cosyvoice-v3-plus',
+  'cosyvoice-v3-flash',
+  'cosyvoice-v2',
 ] as const;
 
-export type BailianMinimaxTtsModel = (typeof BAILIAN_MINIMAX_TTS_MODELS)[number];
+export type BailianCosyVoiceTtsModel = (typeof BAILIAN_COSYVOICE_TTS_MODELS)[number];
 
 export interface BailianCredentials {
   apiKey: string;
@@ -23,9 +25,8 @@ export interface BailianCredentials {
 
 export interface BailianVoiceCloneResult {
   voiceId: string;
-  model: BailianMinimaxTtsModel;
-  previewBytes?: Buffer;
-  previewExt?: '.mp3';
+  model: BailianCosyVoiceTtsModel;
+  requestId?: string;
 }
 
 export function resolveBailianCredentials(
@@ -40,22 +41,40 @@ export function resolveBailianCredentials(
 export async function generateBailianTts(opts: {
   text: string;
   voiceId?: string;
-  model?: BailianMinimaxTtsModel;
-  speed?: number;
-  vol?: number;
+  model?: BailianCosyVoiceTtsModel;
+  rate?: number;
+  volume?: number;
   pitch?: number;
+  instruction?: string;
   emotion?: string;
+  scene?: string;
   creds: BailianCredentials;
   signal?: AbortSignal;
 }): Promise<MinimaxAudioResult> {
   const text = (opts.text || '').trim();
   if (!text) throw new HtmlVideoError('invalid-input', 'narration text is empty');
 
-  const model = opts.model ?? 'MiniMax/speech-02-turbo';
-  if (!BAILIAN_MINIMAX_TTS_MODELS.includes(model)) {
-    throw new HtmlVideoError('invalid-input', `unsupported Bailian MiniMax TTS model: ${model}`);
+  const model = opts.model ?? 'cosyvoice-v3-flash';
+  if (!BAILIAN_COSYVOICE_TTS_MODELS.includes(model)) {
+    throw new HtmlVideoError('invalid-input', `unsupported Bailian CosyVoice TTS model: ${model}`);
   }
-  const voiceId = (opts.voiceId || '').trim() || 'male-qn-qingse';
+  const voiceId = (opts.voiceId || '').trim() || 'longanyang';
+  const input: Record<string, unknown> = {
+    text,
+    voice: voiceId,
+    format: 'mp3',
+    sample_rate: 24000,
+  };
+  if (opts.volume !== undefined) input.volume = clampInteger(opts.volume, 0, 100, 'volume');
+  if (opts.rate !== undefined) input.rate = clampNumber(opts.rate, 0.5, 2, 'rate');
+  if (opts.pitch !== undefined) input.pitch = clampNumber(opts.pitch, 0.5, 2, 'pitch');
+  const instruction = buildCosyVoiceInstruction({
+    instruction: opts.instruction,
+    emotion: opts.emotion,
+    scene: opts.scene,
+  });
+  if (instruction) input.instruction = instruction;
+
   const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = opts.signal
     ? (AbortSignal.any ? AbortSignal.any([opts.signal, timeoutSignal]) : opts.signal)
@@ -71,22 +90,7 @@ export async function generateBailianTts(opts: {
       },
       body: JSON.stringify({
         model,
-        input: {
-          text,
-          voice_setting: {
-            voice_id: voiceId,
-            speed: opts.speed ?? 1,
-            vol: opts.vol ?? 1,
-            pitch: opts.pitch ?? 0,
-            ...(opts.emotion ? { emotion: opts.emotion } : {}),
-          },
-          audio_setting: {
-            sample_rate: 32000,
-            bitrate: 128000,
-            format: 'mp3',
-            channel: 1,
-          },
-        },
+        input,
       }),
       signal,
     });
@@ -97,8 +101,8 @@ export async function generateBailianTts(opts: {
     throw new HtmlVideoError(
       'render-failed',
       isTimeout
-        ? `Bailian MiniMax TTS timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
-        : `Bailian MiniMax TTS request failed: ${message}`,
+        ? `Bailian CosyVoice TTS timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+        : `Bailian CosyVoice TTS request failed: ${message}`,
       true,
     );
   }
@@ -107,7 +111,7 @@ export async function generateBailianTts(opts: {
   if (!response.ok) {
     throw new HtmlVideoError(
       'render-failed',
-      `Bailian MiniMax TTS ${response.status}: ${truncate(responseText, 300)}`,
+      `Bailian CosyVoice TTS ${response.status}: ${truncate(responseText, 300)}`,
       response.status >= 500,
     );
   }
@@ -116,13 +120,13 @@ export async function generateBailianTts(opts: {
   try {
     payload = JSON.parse(responseText);
   } catch {
-    throw new HtmlVideoError('render-failed', 'Bailian MiniMax TTS returned non-JSON data');
+    throw new HtmlVideoError('render-failed', 'Bailian CosyVoice TTS returned non-JSON data');
   }
 
   const code = findString(payload, [['code'], ['output', 'code']]);
   if (code && code !== 'Success') {
     const message = findString(payload, [['message'], ['output', 'message'], ['error', 'message']]);
-    throw new HtmlVideoError('render-failed', `Bailian MiniMax TTS ${code}: ${message || 'request failed'}`);
+    throw new HtmlVideoError('render-failed', `Bailian CosyVoice TTS ${code}: ${message || 'request failed'}`);
   }
 
   const audioData = findString(payload, [
@@ -151,33 +155,33 @@ export async function generateBailianTts(opts: {
   } else {
     throw new HtmlVideoError(
       'render-failed',
-      `Bailian MiniMax TTS response missing audio: ${truncate(responseText, 300)}`,
+      `Bailian CosyVoice TTS response missing audio: ${truncate(responseText, 300)}`,
     );
   }
 
   if (bytes.length === 0) {
-    throw new HtmlVideoError('render-failed', 'Bailian MiniMax TTS returned zero audio bytes');
+    throw new HtmlVideoError('render-failed', 'Bailian CosyVoice TTS returned zero audio bytes');
   }
   return {
     bytes,
     ext: '.mp3',
-    providerNote: `bailian/${model} / ${voiceId} / ${bytes.length} bytes`,
+    providerNote: `bailian/cosyvoice/${model} / ${voiceId} / ${bytes.length} bytes`,
   };
 }
 
-export async function cloneBailianMinimaxVoice(opts: {
-  voiceId: string;
+export async function cloneBailianCosyVoice(opts: {
+  prefix: string;
   audioUrl: string;
-  previewText: string;
-  model?: BailianMinimaxTtsModel;
+  model?: BailianCosyVoiceTtsModel;
+  languageHints?: string[];
   creds: BailianCredentials;
   signal?: AbortSignal;
 }): Promise<BailianVoiceCloneResult> {
-  const voiceId = (opts.voiceId || '').trim();
-  if (!/^[A-Za-z0-9_-]{4,64}$/.test(voiceId)) {
+  const prefix = (opts.prefix || '').trim();
+  if (!/^[A-Za-z0-9]{1,10}$/.test(prefix)) {
     throw new HtmlVideoError(
       'invalid-input',
-      'voice id must be 4-64 characters using letters, numbers, hyphens, or underscores',
+      'voice prefix must be 1-10 characters using letters or numbers',
     );
   }
   const audioUrl = (opts.audioUrl || '').trim();
@@ -190,42 +194,41 @@ export async function cloneBailianMinimaxVoice(opts: {
   if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
     throw new HtmlVideoError('invalid-input', 'voice clone audio must use a public HTTP(S) URL');
   }
-  const previewText = (opts.previewText || '').trim();
-  if (!previewText) {
-    throw new HtmlVideoError('invalid-input', 'voice clone preview text is empty');
+  const model = opts.model ?? 'cosyvoice-v3-flash';
+  if (!BAILIAN_COSYVOICE_TTS_MODELS.includes(model)) {
+    throw new HtmlVideoError('invalid-input', `unsupported Bailian CosyVoice TTS model: ${model}`);
   }
-  const model = opts.model ?? 'MiniMax/speech-2.8-turbo';
-  if (!BAILIAN_MINIMAX_TTS_MODELS.includes(model)) {
-    throw new HtmlVideoError('invalid-input', `unsupported Bailian MiniMax TTS model: ${model}`);
-  }
+  const languageHints = sanitizeLanguageHints(opts.languageHints);
 
   const payload = await postJson({
     creds: opts.creds,
     signal: opts.signal,
     label: 'voice clone',
+    path: CUSTOMIZATION_PATH,
     body: {
-      model,
+      model: 'voice-enrollment',
       input: {
-        action: 'voice_clone',
-        voice_id: voiceId,
-        audio_url: audioUrl,
-        text: previewText,
+        action: 'create_voice',
+        target_model: model,
+        prefix,
+        url: audioUrl,
+        ...(languageHints.length ? { language_hints: languageHints } : {}),
       },
     },
   });
 
-  const audioData = findString(payload, [
-    ['output', 'audio'],
-    ['output', 'audio', 'data'],
-    ['output', 'data', 'audio'],
-    ['data', 'audio'],
-    ['audio', 'data'],
+  const voiceId = findString(payload, [
+    ['output', 'voice_id'],
+    ['output', 'voice'],
+    ['data', 'voice_id'],
+    ['voice_id'],
   ]);
+  const requestId = findString(payload, [['request_id'], ['requestId']]);
 
   return {
-    voiceId,
+    voiceId: voiceId ?? prefix,
     model,
-    ...(audioData ? { previewBytes: decodeAudioData(audioData), previewExt: '.mp3' as const } : {}),
+    ...(requestId ? { requestId } : {}),
   };
 }
 
@@ -233,6 +236,7 @@ async function postJson(opts: {
   creds: BailianCredentials;
   body: unknown;
   label: string;
+  path?: string;
   signal?: AbortSignal;
 }): Promise<unknown> {
   const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
@@ -241,7 +245,7 @@ async function postJson(opts: {
     : timeoutSignal;
   let response: Response;
   try {
-    response = await fetch(`${opts.creds.baseUrl}${TTS_PATH}`, {
+    response = await fetch(`${opts.creds.baseUrl}${opts.path ?? TTS_PATH}`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${opts.creds.apiKey}`,
@@ -257,8 +261,8 @@ async function postJson(opts: {
     throw new HtmlVideoError(
       'render-failed',
       isTimeout
-        ? `Bailian MiniMax ${opts.label} timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
-        : `Bailian MiniMax ${opts.label} request failed: ${message}`,
+        ? `Bailian CosyVoice ${opts.label} timed out after ${REQUEST_TIMEOUT_MS / 1000}s`
+        : `Bailian CosyVoice ${opts.label} request failed: ${message}`,
       true,
     );
   }
@@ -267,7 +271,7 @@ async function postJson(opts: {
   if (!response.ok) {
     throw new HtmlVideoError(
       'render-failed',
-      `Bailian MiniMax ${opts.label} ${response.status}: ${truncate(responseText, 300)}`,
+      `Bailian CosyVoice ${opts.label} ${response.status}: ${truncate(responseText, 300)}`,
       response.status >= 500,
     );
   }
@@ -275,17 +279,53 @@ async function postJson(opts: {
   try {
     payload = JSON.parse(responseText);
   } catch {
-    throw new HtmlVideoError('render-failed', `Bailian MiniMax ${opts.label} returned non-JSON data`);
+    throw new HtmlVideoError('render-failed', `Bailian CosyVoice ${opts.label} returned non-JSON data`);
   }
   const code = findString(payload, [['code'], ['output', 'code']]);
   if (code && code !== 'Success') {
     const message = findString(payload, [['message'], ['output', 'message'], ['error', 'message']]);
     throw new HtmlVideoError(
       'render-failed',
-      `Bailian MiniMax ${opts.label} ${code}: ${message || 'request failed'}`,
+      `Bailian CosyVoice ${opts.label} ${code}: ${message || 'request failed'}`,
     );
   }
   return payload;
+}
+
+function buildCosyVoiceInstruction(opts: {
+  instruction?: string;
+  emotion?: string;
+  scene?: string;
+}): string | undefined {
+  const instruction = (opts.instruction || '').trim();
+  if (instruction) return instruction.slice(0, 100);
+  const emotion = (opts.emotion || '').trim();
+  const scene = (opts.scene || '').trim();
+  if (scene && emotion) return `你正在进行${scene}，你说话的情感是${emotion}。`;
+  if (emotion) return `你说话的情感是${emotion}。`;
+  if (scene) return `你正在进行${scene}。`;
+  return undefined;
+}
+
+function clampInteger(value: number, min: number, max: number, label: string): number {
+  if (!Number.isFinite(value)) {
+    throw new HtmlVideoError('invalid-input', `${label} must be a finite number`);
+  }
+  return Math.round(Math.min(max, Math.max(min, value)));
+}
+
+function clampNumber(value: number, min: number, max: number, label: string): number {
+  if (!Number.isFinite(value)) {
+    throw new HtmlVideoError('invalid-input', `${label} must be a finite number`);
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
+function sanitizeLanguageHints(value?: string[]): string[] {
+  return (value ?? [])
+    .map((item) => item.trim())
+    .filter((item) => /^[a-z]{2}$/.test(item))
+    .slice(0, 1);
 }
 
 function decodeAudioData(value: string): Buffer {

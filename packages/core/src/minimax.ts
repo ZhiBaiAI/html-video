@@ -1,10 +1,8 @@
 /**
  * @html-video/core — MiniMax audio provider.
  *
- * MiniMax exposes speech (`/t2a_v2`) and music (`/music_generation`) under the
- * same host, the same Bearer key, and the same response shape — both wrap the
- * payload in a `base_resp` envelope and return the audio as a hex string in
- * `data.audio`. So one provider + one key covers both narration and music.
+ * MiniMax exposes speech (`/t2a_v2`) under a region-bound host and returns the
+ * audio in a `base_resp` envelope as a hex string in `data.audio`.
  *
  * The request/parse pattern is ported from open-design's `renderMinimaxTTS`
  * (apps/daemon/src/media.ts): fetch → Bearer → check `base_resp.status_code`
@@ -24,19 +22,10 @@ import { HtmlVideoError } from './errors.js';
  *  OD_MINIMAX_BASE_URL / MINIMAX_BASE_URL (or the Studio Settings UI). */
 const MINIMAX_DEFAULT_BASE_URL = 'https://api.minimax.io/v1';
 
-/** Hard ceiling for a single MiniMax request. Music generation is slow but a
- *  request that hasn't returned in 2 minutes is hung, not slow. */
+/** Hard ceiling for a single MiniMax request. */
 const MINIMAX_REQUEST_TIMEOUT_MS = 120_000;
 /** Fast turbo speech tier (same default open-design ships). */
 const MINIMAX_TTS_MODEL = 'speech-02-turbo';
-/**
- * Music model. We use music-1.5, NOT the newer music-2.6 family: 2.6's
- * synchronous music_generation call never returns for our key (verified: 180s
- * with no response), whereas music-1.5 returns audio synchronously in ~50s.
- * Trade-off: 1.5 has no `is_instrumental` flag and REQUIRES a `lyrics` field,
- * so for instrumental soundtracks we pass a minimal humming placeholder.
- */
-const MINIMAX_MUSIC_MODEL = 'music-1.5';
 
 export interface MinimaxCredentials {
   apiKey: string;
@@ -74,7 +63,7 @@ export function resolveMinimaxCredentials(
 }
 
 /**
- * Shared POST + decode for both MiniMax audio endpoints. Throws
+ * Shared POST + decode for MiniMax audio endpoints. Throws
  * HtmlVideoError('render-failed', …) on transport / API / decode failure.
  */
 async function postAndDecode(
@@ -84,7 +73,7 @@ async function postAndDecode(
   label: string,
   signal?: AbortSignal,
 ): Promise<{ bytes: Buffer; extraInfo: Record<string, unknown> }> {
-  // MiniMax generation (esp. music) can take tens of seconds, but it must NOT
+  // MiniMax generation can take tens of seconds, but it must NOT
   // hang forever — an unbounded fetch leaves the studio's SSE stream stuck on
   // "generating…" with no failure event, which reads to the user as "the button
   // does nothing". Cap it; if the caller passed its own signal, respect that.
@@ -200,43 +189,6 @@ export async function generateTts(opts: {
     ext: '.mp3',
     providerNote: `minimax/${MINIMAX_TTS_MODEL} · ${voiceId} · ${durationSec ?? '?'}s · ${bytes.length} bytes`,
     durationSec,
-  };
-}
-
-/**
- * Generate background music via MiniMax (`/music_generation`).
- * Instrumental-only by default (a video soundtrack rarely wants vocals).
- */
-export async function generateMusic(opts: {
-  prompt: string;
-  instrumental?: boolean;
-  creds: MinimaxCredentials;
-  signal?: AbortSignal;
-}): Promise<MinimaxAudioResult> {
-  const prompt = (opts.prompt || '').trim();
-  if (!prompt) {
-    throw new HtmlVideoError('invalid-input', 'music prompt is empty');
-  }
-
-  const instrumental = opts.instrumental ?? true;
-  // music-1.5 requires a non-empty `lyrics` field and has no is_instrumental
-  // flag. For an instrumental soundtrack we feed a minimal hummed placeholder
-  // so the model produces a melody without foregrounded vocals; otherwise let
-  // the prompt double as a loose lyrical brief.
-  const lyrics = instrumental ? '[Intro]\nooh ooh\n[Hook]\nla la la' : prompt;
-  const body = {
-    model: MINIMAX_MUSIC_MODEL,
-    prompt,
-    lyrics,
-    audio_setting: { sample_rate: 44100, bitrate: 256000, format: 'mp3' },
-    output_format: 'hex',
-  };
-
-  const { bytes } = await postAndDecode('music_generation', body, opts.creds, 'music', opts.signal);
-  return {
-    bytes,
-    ext: '.mp3',
-    providerNote: `minimax/${MINIMAX_MUSIC_MODEL} · ${instrumental ? 'instrumental' : 'with-vocals'} · ${bytes.length} bytes`,
   };
 }
 

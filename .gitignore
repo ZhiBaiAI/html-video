@@ -21,6 +21,7 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 .pnp.*
+.corepack/
 
 # Python
 __pycache__/
@@ -28,6 +29,7 @@ __pycache__/
 *$py.class
 .Python
 .venv/
+.venv-whisper/
 venv/
 *.egg-info/
 
@@ -65,3 +67,6 @@ tmp/
 *.gif
 output/
 renders/
+
+# WorkBuddy workspace memory
+.workbuddy/

@@ -5,20 +5,21 @@
  *
  * Credential precedence when resolving (config file wins over env, since the
  * GUI is the explicit user choice):
- *   media-config.json  →  OD_MINIMAX_API_KEY / MINIMAX_API_KEY env
+ *   media-config.json  →  provider-specific env
  *
- * Mirrors open-design's `.od/media-config.json` shape loosely; we only need
- * MiniMax here. The file holds the raw key, so it lives in the gitignored
+ * Mirrors open-design's `.od/media-config.json` shape loosely. The file holds
+ * the raw key, so it lives in the gitignored
  * `.html-video/` runtime dir, never the repo.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BAILIAN_COSYVOICE_TTS_MODELS,
   resolveBailianCredentials,
   resolveMinimaxCredentials,
+  type BailianCosyVoiceTtsModel,
   type BailianCredentials,
-  type BailianMinimaxTtsModel,
   type MinimaxCredentials,
 } from '@html-video/core';
 
@@ -26,13 +27,13 @@ export type NarrationProvider = 'minimax' | 'bailian';
 
 export interface NarrationConfig {
   provider: NarrationProvider;
-  model: BailianMinimaxTtsModel;
+  model: BailianCosyVoiceTtsModel;
 }
 
 export interface ClonedNarrationVoice {
   id: string;
   name: string;
-  model: BailianMinimaxTtsModel;
+  model: BailianCosyVoiceTtsModel;
   audioUrl: string;
   createdAt: string;
 }
@@ -42,7 +43,7 @@ interface MediaConfig {
   bailian?: { apiKey?: string; baseUrl?: string };
   narration?: {
     provider?: NarrationProvider;
-    model?: BailianMinimaxTtsModel;
+    model?: BailianCosyVoiceTtsModel;
     clonedVoices?: ClonedNarrationVoice[];
     defaultVoiceId?: string;
   };
@@ -122,8 +123,8 @@ export class MediaConfigStore {
     baseUrl: string;
   } {
     const cfg = this.read();
-    const provider = cfg.narration?.provider ?? 'minimax';
-    const model = cfg.narration?.model ?? 'MiniMax/speech-02-turbo';
+    const provider = cfg.narration?.provider ?? 'bailian';
+    const model = normalizeCosyVoiceModel(cfg.narration?.model);
     if (provider === 'bailian') {
       const stored = cfg.bailian;
       if (stored?.apiKey) {
@@ -151,7 +152,7 @@ export class MediaConfigStore {
 
   setNarration(opts: {
     provider: NarrationProvider;
-    model?: BailianMinimaxTtsModel;
+    model?: BailianCosyVoiceTtsModel;
     apiKey?: string;
     baseUrl?: string;
   }): void {
@@ -159,7 +160,7 @@ export class MediaConfigStore {
     cfg.narration = {
       ...(cfg.narration ?? {}),
       provider: opts.provider,
-      model: opts.model ?? 'MiniMax/speech-02-turbo',
+      model: normalizeCosyVoiceModel(opts.model),
     };
     const apiKey = (opts.apiKey ?? '').trim();
     const baseUrl = (opts.baseUrl ?? '').trim().replace(/\/$/, '');
@@ -173,7 +174,7 @@ export class MediaConfigStore {
 
   clearNarration(): void {
     const cfg = this.read();
-    const provider = cfg.narration?.provider ?? 'minimax';
+    const provider = cfg.narration?.provider ?? 'bailian';
     if (provider === 'bailian') delete cfg.bailian;
     else delete cfg.minimax;
     if (cfg.narration?.clonedVoices?.length || cfg.narration?.defaultVoiceId) {
@@ -187,10 +188,10 @@ export class MediaConfigStore {
 
   resolveNarration():
     | { provider: 'minimax'; creds: MinimaxCredentials }
-    | { provider: 'bailian'; creds: BailianCredentials; model: BailianMinimaxTtsModel }
+    | { provider: 'bailian'; creds: BailianCredentials; model: BailianCosyVoiceTtsModel }
     | null {
     const cfg = this.read();
-    const provider = cfg.narration?.provider ?? 'minimax';
+    const provider = cfg.narration?.provider ?? 'bailian';
     if (provider === 'bailian') {
       const stored = cfg.bailian;
       const creds = stored?.apiKey
@@ -203,7 +204,7 @@ export class MediaConfigStore {
         ? {
             provider,
             creds,
-            model: cfg.narration?.model ?? 'MiniMax/speech-02-turbo',
+            model: normalizeCosyVoiceModel(cfg.narration?.model),
           }
         : null;
     }
@@ -284,4 +285,11 @@ export class MediaConfigStore {
 function mask(key: string): string {
   if (key.length <= 8) return '••••';
   return `${key.slice(0, 4)}••••${key.slice(-4)}`;
+}
+
+function normalizeCosyVoiceModel(model: unknown): BailianCosyVoiceTtsModel {
+  return typeof model === 'string'
+    && (BAILIAN_COSYVOICE_TTS_MODELS as readonly string[]).includes(model)
+    ? model as BailianCosyVoiceTtsModel
+    : 'cosyvoice-v3-flash';
 }

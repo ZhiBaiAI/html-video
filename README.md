@@ -4,14 +4,14 @@
   <img src="docs/assets/hero.png" alt="html-video — HTML becomes video, on your laptop" width="100%" />
 </p>
 
-> **HTML becomes video — on your laptop.** Bring your local coding agent (Open Design · Windsurf CLI · Trae CLI · Claude Code · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · or the Anthropic API). Describe a video, or **paste an article link / GitHub repo**, and the agent turns it into a multi-frame, fully animated video — then renders it to a real MP4 right on your machine. One agent loop, pluggable rendering engines, a curated template gallery, optional AI soundtrack. Apache-2.0, no per-render fees, no vendor lock-in.
+> **HTML becomes video — on your laptop.** Bring your local coding agent (Open Design · Windsurf CLI · Trae CLI · Claude Code · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · or the Anthropic API). Describe a video, **paste an article link / GitHub repo**, or upload a talking-head clip, and the agent turns it into a multi-frame, fully animated video — then renders it to a real MP4 right on your machine. One agent loop, pluggable rendering engines, a curated template gallery, optional AI soundtrack or source-video voice. Apache-2.0, no per-render fees, no vendor lock-in.
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" /></a>
   <a href="#supported-agents"><img alt="Agents" src="https://img.shields.io/badge/agents-14%20backends-111?style=flat-square" /></a>
   <a href="#showcase"><img alt="Templates" src="https://img.shields.io/badge/templates-21-3ce6ac?style=flat-square" /></a>
   <a href="#turn-a-link-into-a-video"><img alt="Sources" src="https://img.shields.io/badge/from-article%20%C2%B7%20repo%20%C2%B7%20prompt-9b59b6?style=flat-square" /></a>
-  <a href="#soundtrack"><img alt="Soundtrack" src="https://img.shields.io/badge/soundtrack-AI%20music%20%2B%20narration-e67e22?style=flat-square" /></a>
+  <a href="#audio--talking-head"><img alt="Audio" src="https://img.shields.io/badge/audio-AI%20voice%20%C2%B7%20talking--head-e67e22?style=flat-square" /></a>
   <a href="#quick-start"><img alt="Quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-22a34a?style=flat-square" /></a>
 </p>
 
@@ -96,6 +96,7 @@ The same idea powers [Open Design](https://github.com/nexu-io/open-design) in th
 | **21 templates** | Curated, license-clean patterns: data viz, product promos, social shorts, explainers, kinetic type, transitions — previewed live in the gallery. |
 | **Multi-frame storyboards** | A content-graph drives multi-scene videos; edit per-frame text inline, reorder, re-render. |
 | **AI soundtrack** | Optional background music + narration via MiniMax, mixed into the MP4 at export. |
+| **Talking-head source** | Upload a speaker video, transcribe it with local Whisper, and export with the speaker overlaid bottom-right using the source audio. |
 | **Studio + CLI** | A local browser studio *and* a scriptable `html-video` CLI. |
 | **License** | Apache-2.0 — no per-render fees, no seat caps, no contributor agreements. |
 
@@ -106,10 +107,10 @@ The same idea powers [Open Design](https://github.com/nexu-io/open-design) in th
 One sentence (or one link) goes in; a real MP4 comes out. The pipeline is the same whether you start from a prompt, an article, or a repo:
 
 ```
-  prompt / link / repo
+  prompt / link / repo / talking-head video
         │
         ▼
-  ① source fetch        studio pulls the URL or repo server-side, flattens it to Markdown
+  ① source ingest       studio pulls the URL/repo server-side, or transcribes a video locally
         │
         ▼
   ② agent loop          your agent reads the material + the picked template's style and emits
@@ -125,12 +126,12 @@ One sentence (or one link) goes in; a real MP4 comes out. The pipeline is the sa
         │               cover the frame's own animation), → webm per frame
         ▼
   ⑥ ffmpeg              each webm → mp4 (libx264), then concat into one video;
-        │               optional MiniMax music + narration mixed in
+        │               optional AI soundtrack, or source-video audio + bottom-right overlay
         ▼
       your.mp4
 ```
 
-Steps ②–④ are where the "meta-layer" lives: the agent decides the storyboard and the engine decides how to draw it, and neither leaks into the other. Step ⑤ is engine-specific — swapping in Remotion or Motion Canvas later replaces only that box, leaving the storyboard and the agent loop untouched. Everything runs on your machine; the only network calls are the optional source fetch and the optional soundtrack.
+Steps ②–④ are where the "meta-layer" lives: the agent decides the storyboard and the engine decides how to draw it, and neither leaks into the other. Step ⑤ is engine-specific — swapping in Remotion or Motion Canvas later replaces only that box, leaving the storyboard and the agent loop untouched. Everything runs on your machine; the only network calls are the optional source fetch and optional AI soundtrack.
 
 Single-frame videos take a fast path that skips the content-graph — one template, one HTML, straight to render.
 
@@ -179,7 +180,7 @@ pnpm -r build
 node packages/cli/dist/bin.js studio    # opens the studio at http://127.0.0.1:3071
 ```
 
-In the studio: pick a template (or just describe a video / paste a link), chat with your agent, edit per-frame text, add a soundtrack, and export MP4.
+In the studio: pick a template (or just describe a video / paste a link / upload a talking-head clip), chat with your agent, edit per-frame text, choose source-video audio or AI soundtrack, and export MP4.
 
 CLI utilities:
 
@@ -215,14 +216,19 @@ Nothing installed? Set an Anthropic key and the studio talks to the Messages API
 
 ---
 
-## Soundtrack
+## Audio & Talking Head
 
-Give the finished video a voice. In **Settings → Audio**, add a MiniMax API key, then in the per-project **Soundtrack** panel:
+html-video supports two audio/source modes:
+
+- **Talking-head source** — upload a speaker video in the **Talking-head source** panel, run local Whisper to extract timestamped subtitles, then ask the agent to generate the video from that transcript. On export, the speaker video is overlaid bottom-right and its original audio becomes the final audio track.
+- **AI soundtrack** — in **Settings → Audio**, add a MiniMax API key, then use the per-project **Soundtrack** panel.
+
+For AI soundtrack mode:
 
 - **Background music** — describe a mood (`calm cinematic ambient, slow build`); MiniMax generates an instrumental track.
 - **Narration** — type a script; MiniMax reads it (TTS).
 
-Both are mixed into the exported MP4 (music ducked under the voice, optional fade-in/out) via ffmpeg. No key configured? The rest of the studio works unchanged.
+Music and narration are mixed into the exported MP4 (music ducked under the voice, optional fade-in/out) via ffmpeg. If talking-head mode is enabled, source-video audio takes precedence for that export; the saved AI soundtrack remains on the project for later use.
 
 ---
 
@@ -244,13 +250,13 @@ That last part is deliberate. Every template is **license-clean by construction*
 ```
 packages/
 ├── core/                  Project / Asset / ContentGraph types, registries, orchestrator,
-│                          MiniMax provider + ffmpeg audio mux
+│                          MiniMax provider + ffmpeg audio/talking-head post-processing
 ├── content-graph/         Multi-frame storyboard IR (nodes + edges, topo-sort)
 │ runtime/               Agent runtime — detect / spawn / stream
 │                          (Open Design/Vela · Windsurf CLI · Trae CLI · Claude · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · Anthropic API)
 ├── adapter-hyperframes/   Hyperframes engine adapter — real render via Chromium + ffmpeg
 ├── cli/                   `html-video` command + the studio HTTP server + source fetching
-└── project-studio/        Browser studio UI (chat, template gallery, frames, soundtrack, export)
+└── project-studio/        Browser studio UI (chat, template gallery, frames, talking-head, soundtrack, export)
 templates/                 21 curated, license-clean video templates
 research/                  RFCs (engine adapter / template metadata / agent skill / content-graph)
 ```
@@ -265,6 +271,7 @@ research/                  RFCs (engine adapter / template metadata / agent skil
 - [x] Studio: live template gallery, agent switcher, per-frame text editing
 - [x] Source material: article / GitHub-repo → video
 - [x] AI soundtrack (MiniMax music + narration), mixed at export
+- [x] Talking-head video: local Whisper transcript + bottom-right overlay with source audio
 - [x] Real MP4 render — Hyperframes engine via headless Chromium + ffmpeg
 - [x] Agent model selection — Open Design (Vela) backend, live model catalog
 - [ ] Adapters for Remotion / Motion Canvas / Revideo

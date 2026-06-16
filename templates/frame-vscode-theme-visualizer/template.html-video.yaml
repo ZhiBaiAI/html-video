@@ -1,0 +1,88 @@
+spec_version: 1
+id: frame-vscode-theme-visualizer
+name: VS Code Theme Visualizer
+description: >
+  Faithful VS Code workbench recreation with per-character typing animation
+  across built-in themes. Activity bar, sidebar, tabs, editor, terminal, and
+  status bar are driven by theme JSON files.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: index.html
+
+category: product-demo
+subcategory: developer-tool
+tags: [code, developer, vscode, themes, workbench, typing, terminal, showcase]
+
+best_for:
+  - "Developer tool launches and code-editor showcases"
+  - "Theme-aware product demos"
+  - "Code writing scenes with real workbench context"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9"]
+  fps:
+    default: 30
+    supported: [30, 60]
+  duration:
+    type: fixed
+    min_sec: 132
+    max_sec: 132
+    default_sec: 132
+  alpha: false
+  audio: { supported: false }
+
+inputs:
+  schema:
+    type: object
+    properties: {}
+  examples: []
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+  notes: >
+    Forked from heygen-com/hyperframes registry/examples/vscode-theme-visualizer
+    (Apache-2.0). Includes VS Code built-in theme JSON files with their upstream
+    license preserved under assets/vscode-themes/LICENSE.
+
+provenance:
+  origin:
+    name: "Microsoft Visual Studio Code built-in themes"
+    kind: movement
+    reference: https://github.com/microsoft/vscode/tree/main/extensions/theme-defaults/themes
+  via_skill:
+    name: "hyperframes registry/examples/vscode-theme-visualizer"
+    author: "heygen-com / Hyperframes"
+    url: https://github.com/heygen-com/hyperframes/tree/main/registry/examples/vscode-theme-visualizer
+    license: Apache-2.0
+    source_file: index.html
+  transformation: >
+    Imported as a first-class html-video template with metadata, gallery poster,
+    attribution, and a compositions/ compatibility copy of Hyperframes render
+    entries so the studio preview can load the referenced sub-compositions.
+
+assets_attribution:
+  - name: "hyperframes registry/examples/vscode-theme-visualizer"
+    license: "Apache-2.0"
+    author: "heygen-com / Hyperframes"
+    url: "https://github.com/heygen-com/hyperframes/tree/main/registry/examples/vscode-theme-visualizer"
+  - name: "VS Code built-in theme JSON files"
+    license: "MIT"
+    author: "Microsoft"
+    url: "https://github.com/microsoft/vscode/tree/main/extensions/theme-defaults/themes"
+
+author:
+  name: "heygen-com / Hyperframes"
+  url: "https://github.com/heygen-com/hyperframes"
+
+version: "0.1.0"
+
+preview:
+  poster: poster.svg

@@ -2,6 +2,14 @@
 
 import { t, getLocale, setLocale, AVAILABLE_LOCALES } from './i18n.js';
 
+const DEFAULT_CLONE_AUDIO_URL = [
+  'https://bailian-bmp-prod.oss-cn-beijing.aliyuncs.com/model_offline_result/11751412/1781175777482/qianwen/recording_1781175775568.wav',
+  '?Expires=1781182978',
+  '&OSSAccessKeyId=STS.NZ1WVUaukZeMxYoE4jg34Rd3J',
+  '&Signature=k9V3dbCdhTD4RTpuwARFC1WGnNQ%3D',
+  '&security-token=CAIS2AJ1q6Ft5B2yfSjIr5mEHOzhjKpK7aemen%2FeoTQ%2Fa7wYvaGYqDz2IHhMenRoAu8fv%2FU1nmlQ6%2FsZlrp6SJtIXleCZtF94oxN9h2gb4fb4y1LA2qH08%2FLI3OaLjKm9u2wCryLYbGwU%2FOpbE%2B%2B5U0X6LDmdDKkckW4OJmS8%2FBOZcgWWQ%2FKBlgvRq0hRG1YpdQdKGHaONu0LxfumRCwNkdzvRdmgm4NgsbWgO%2Fks0CD0w2rlLFL%2BdugcsT4MvMBZskvD42Hu8VtbbfE3SJq7BxHybx7lqQs%2B02c5onDXgEKvEzXYrCOq4UycVRjE6IgHKdIt%2FP7jfA9sOHVnITywgxOePlRWjjRQ5ql0E4ehBQP3yBTn9%2FVTJeturjnXvGd24ikVa0RnwBBMhytfsq8tbjo7uXGa%2FbB1hmjSUyYUMumi%2BluDkYtlgzV9eKArlL3Sa2Rv07lcjH7NCtAXxqAAT6Yetg3RRB6Z%2BsfiRqjNnfHABdKlyh38F%2Fvw2aRvgJxA2efFAA5N6MvQY2g6juFRm3amck7ITMezlp1SMVRAhGORlhklC03RCVGB8zcadmvQ0pvS0id0%2BoND0X92QVgN7DPUk98f5uO0TJP9d28fxW8by6sZn8s4%2FFcDtO2o%2BVSIAA%3D',
+].join('');
+
 // Re-render whole UI on language change.
 document.addEventListener('hv-locale-change', () => {
   document.documentElement.lang = getLocale();
@@ -11,28 +19,57 @@ document.addEventListener('hv-locale-change', () => {
 });
 document.documentElement.lang = getLocale();
 
-// Background-music style presets. Clicking a chip fills the prompt textarea
-// with a tuned English MiniMax prompt (the model follows English best); the
-// label is localized via i18n (soundtrack.preset_<key>). Still editable after.
-const MUSIC_PRESETS = [
-  { key: 'energetic', prompt: 'energetic upbeat electronic, driving beat, punchy synths, modern and confident' },
-  { key: 'calm',      prompt: 'calm ambient pad, soft piano, slow and soothing, gentle and warm' },
-  { key: 'tech',      prompt: 'sleek tech corporate, pulsing synth arpeggio, clean minimal beat, futuristic' },
-  { key: 'narrative', prompt: 'cinematic storytelling score, emotional strings, building piano, reflective' },
-  { key: 'minimal',   prompt: 'minimal lo-fi, sparse beat, mellow keys, understated background bed' },
-  { key: 'epic',      prompt: 'epic orchestral, powerful drums, soaring brass, dramatic and inspiring' },
-];
-
-// Narration voices — MiniMax built-in voice_ids, all verified usable.
+// Narration voices — Bailian CosyVoice v3 flash built-in voice ids.
 // `key` maps to a localized label (soundtrack.voice_<key>).
 const NARRATION_VOICES = [
-  { key: 'male_warm',     voiceId: 'male-qn-qingse' },
-  { key: 'male_pro',      voiceId: 'male-qn-jingying' },
-  { key: 'male_deep',     voiceId: 'audiobook_male_1' },
-  { key: 'female_anchor', voiceId: 'presenter_female' },
-  { key: 'female_mature', voiceId: 'female-yujie' },
-  { key: 'female_sweet',  voiceId: 'female-shaonv' },
+  { key: 'male_warm',     voiceId: 'longanyang' },
+  { key: 'male_pro',      voiceId: 'longjielidou_v3' },
+  { key: 'male_deep',     voiceId: 'longlaotie_v3' },
+  { key: 'female_anchor', voiceId: 'longanhuan_v3' },
+  { key: 'female_mature', voiceId: 'longshanshan_v3' },
+  { key: 'female_sweet',  voiceId: 'longpaopao_v3' },
 ];
+
+const TEMPLATE_ZH = {
+  'frame-bold-poster': { name: '强海报', desc: '杂志封面式强标题，适合宣言、观点和开场。' },
+  'frame-bold-signal': { name: '强信号', desc: '深色底上的高冲击章节卡，适合发布会和章节分隔。' },
+  'frame-build-minimal': { name: '奢华极简', desc: '大留白、细字重和金色发丝线，适合高端产品与品牌主视觉。' },
+  'frame-creative-voltage': { name: '创意电压', desc: '电蓝分屏和手写线条，适合创意活动和高能标题。' },
+  'frame-data-chart-nyt': { name: '纽约时报数据图', desc: '编辑部风格动态图表，适合数据报道和年度报告。' },
+  'frame-data-rollup': { name: '数据滚动', desc: 'Remotion 原生数字滚动和柱形动画，适合 KPI 数据帧。' },
+  'frame-decision-tree': { name: '决策树', desc: '分支流程图动画，适合教程、选择路径和流程说明。' },
+  'frame-electric-studio': { name: '电蓝工作室', desc: '黑白蓝高对比分屏引语卡，适合使命宣言和客户证言。' },
+  'frame-glitch-title': { name: '故障标题', desc: '赛博故障感标题揭示，适合技术、安全和黑客气质内容。' },
+  'frame-kinetic-type': { name: '动态文字', desc: '文字驱动的动效标题，适合短促有力的开场。' },
+  'frame-light-leak-cinema': { name: '漏光电影感', desc: '电影漏光和氛围开场，适合纪录片、情绪和冷启动。' },
+  'frame-liquid-bg-hero': { name: '液态背景主视觉', desc: '流体背景上的产品主视觉，适合 SaaS 和发布页视频。' },
+  'frame-logo-outro': { name: '品牌片尾', desc: 'Logo 收尾卡，适合视频结尾和频道签名。' },
+  'frame-motion-blur': { name: '运动模糊', desc: '速度分层与拖影展示，适合解释运动、速度和转场技术。' },
+  'frame-nyt-graph': { name: '纽约时报折线图', desc: '新闻编辑感数据揭示，适合趋势和关键指标。' },
+  'frame-pentagram-stat': { name: '五角星指标', desc: '理性高对比的单指标英雄帧，适合 benchmark 和数据亮点。' },
+  'frame-play-mode': { name: '玩乐模式', desc: '轻松活泼的社媒广告感，适合消费产品和趣味开场。' },
+  'frame-product-promo': { name: '产品宣传', desc: '多卖点产品展示，适合功能介绍和主宣传片。' },
+  'frame-product-promo-30s': { name: '30 秒产品宣传', desc: '完整 30 秒 SaaS 产品宣传节奏。' },
+  'frame-swiss-grid': { name: '瑞士网格', desc: '克制网格和排版主导，适合企业汇报和理性标题。' },
+  'frame-takram-organic': { name: '有机网络', desc: '温暖有机的系统/网络概念展示，适合产品故事和架构说明。' },
+  'frame-vignelli': { name: '维涅利红', desc: '红色强调和经典现代主义构图，适合竖版社媒声明。' },
+  'frame-vscode-theme-visualizer': { name: 'VS Code 主题展示', desc: '代码编辑器主题和打字动画展示，适合开发者工具。' },
+  'frame-warm-grain': { name: '暖颗粒', desc: '温暖颗粒感杂志开场，适合生活方式和产品发布。' },
+  'vfx-text-cursor': { name: '文字光标特效', desc: '文本与光标 VFX，适合代码演示和终端气质开场。' },
+};
+
+function templateDisplayName(tpl) {
+  if (!tpl) return '';
+  const zh = tpl.name_zh || TEMPLATE_ZH[tpl.id]?.name;
+  const en = tpl.name || tpl.id;
+  if (!zh || en.includes(zh)) return en;
+  return `${zh} · ${en}`;
+}
+
+function templateDescription(tpl) {
+  if (!tpl) return '';
+  return tpl.description_zh || TEMPLATE_ZH[tpl.id]?.desc || tpl.description || '';
+}
 
 const API = {
   projects: () => fetch('/api/projects').then(r => r.json()),
@@ -53,10 +90,38 @@ const API = {
   testAgent: id => fetch(`/api/agents/${encodeURIComponent(id)}/test`, { method: 'POST' }).then(r => r.json()),
   rescanAgents: () => fetch('/api/agents?force=1').then(r => r.json()),
   narrationVoices: () => fetch('/api/config/narration/voices').then(r => r.json()),
-  cloneNarrationVoice: b => fetch('/api/config/narration/voices', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(async r => ({ ok: r.ok, status: r.status, data: await r.json() })),
+  cloneNarrationVoiceFromUrl: b => fetch('/api/config/narration/voices/from-url', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(readApiResult),
+  cloneNarrationVoiceRecording: b => fetch('/api/config/narration/voices/recording', { method: 'POST', body: b }).then(readApiResult),
   updateNarrationVoice: (id, b) => fetch(`/api/config/narration/voices/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json()),
   removeNarrationVoice: id => fetch(`/api/config/narration/voices/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(r => r.json()),
+  setTalkingHead: (id, file) => {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    return fetch(`/api/projects/${id}/talking-head`, { method: 'POST', body: fd }).then(r => r.json());
+  },
+  updateTalkingHead: (id, body) => fetch(`/api/projects/${id}/talking-head`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  }).then(r => r.json()),
+  transcribeTalkingHead: (id, body) => fetch(`/api/projects/${id}/talking-head/transcribe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  }).then(async r => ({ ok: r.ok, status: r.status, data: await r.json() })),
+  clearTalkingHead: id => fetch(`/api/projects/${id}/talking-head`, { method: 'DELETE' }).then(r => r.json()),
 };
+
+async function readApiResult(response) {
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { error: text || `HTTP ${response.status}` };
+  }
+  return { ok: response.ok, status: response.status, data };
+}
 
 const state = {
   projects: [],
@@ -75,12 +140,14 @@ const state = {
   editTextMode: false,     // when true, preview iframe accepts inline text edits
   exporting: false,        // export run in progress
   exportProgress: null,    // { pct, stage } during a streamed export
+  narrating: false,        // one-click narrate-to-video run in progress
   lastGraph: null,         // last fetched ContentGraph (for download)
   // Phase C: per-frame native Remotion enhancement
   frameKinds: {},          // { [graphNodeId]: 'entity'|'data'|'text' } for the selected project
   enhancing: null,         // { nodeId, pct, stage } while a single-frame enhance render is in flight
   narrationVoices: [],
   defaultNarrationVoiceId: null,
+  transcribingTalkingHead: false,
 };
 
 // ============== boot ==============
@@ -131,7 +198,7 @@ function narrationVoiceOptions() {
     .map((voice) => `<option value="${voice.voiceId}">${t('soundtrack.voice_' + voice.key)}</option>`)
     .join('');
   const cloned = state.narrationVoices
-    .map((voice) => `<option value="${esc(voice.id)}" ${voice.id === state.defaultNarrationVoiceId ? 'selected' : ''}>${esc(voice.name)} · ${esc(voice.model.replace('MiniMax/', ''))}</option>`)
+    .map((voice) => `<option value="${esc(voice.id)}" ${voice.id === state.defaultNarrationVoiceId ? 'selected' : ''}>${esc(voice.name)} · ${esc(voice.model)}</option>`)
     .join('');
   return `<optgroup label="${esc(t('soundtrack.builtin_voices'))}">${builtIn}</optgroup>`
     + (cloned ? `<optgroup label="${esc(t('soundtrack.cloned_voices'))}">${cloned}</optgroup>` : '');
@@ -387,7 +454,14 @@ async function refreshProjects() {
 
 async function selectProject(id) {
   state.selectedId = id;
-  state.selected = (await API.getProject(id)).project;
+  try {
+    state.selected = (await API.getProject(id)).project;
+  } catch (e) {
+    console.error('selectProject: getProject failed', e);
+    // If we can't load the project, keep the previous selected state
+    // so the UI doesn't go blank.  The caller will see the error.
+    throw e;
+  }
   state.activeFrameId = null;  // reset frame selection on project switch
   state.iterateFocusFrameId = null;
   state.editTextMode = false;
@@ -423,11 +497,16 @@ async function selectProject(id) {
       state.messages.push({ role: 'preview-event', content: t('chat.still_generating'), ts: Date.now() });
     }
   } catch { /* non-fatal */ }
+  // Render the body first, then the toolbar (toolbar is in <header>, outside
+  // #body, so it survives renderMain's innerHTML replacement; calling it after
+  // ensures it reads the latest state.selected).
   renderSidebar();
-  renderToolbar();   // <-- bug fix: toolbar buttons (template / agent / export) must
-                     //     be re-enabled after a project is selected
   renderMain();
-  await refreshTextFields();
+  renderToolbar();   // <-- must come after renderMain() so toolbar reflects the
+                     //     freshly loaded project state (template, agent, etc.)
+  try {
+    await refreshTextFields();
+  } catch { /* non-fatal — text fields are supplementary */ }
 }
 
 // ============== sidebar ==============
@@ -546,7 +625,7 @@ function renderToolbar() {
   if (p && p.templateId) {
     const tpl = state.templates.find(x => x.id === p.templateId);
     pickBtn.classList.remove('empty');
-    pickBtn.querySelector('.label').textContent = tpl ? tpl.name : p.templateId;
+    pickBtn.querySelector('.label').textContent = tpl ? templateDisplayName(tpl) : p.templateId;
   } else {
     pickBtn.classList.add('empty');
     pickBtn.querySelector('.label').textContent = t('toolbar.template_pick');
@@ -557,6 +636,9 @@ function renderToolbar() {
   // the v0.x stub is gone.
   const hasFrames = !!(p && Array.isArray(p.frames) && p.frames.length > 0);
   exportBtn.disabled = !p || (!p.templateId && !hasFrames) || !!state.exporting;
+  // Narrate needs a project + an agent; block while exporting/narrating.
+  const narrateBtn = document.getElementById('btn-narrate');
+  if (narrateBtn) narrateBtn.disabled = !p || !!state.exporting || !!state.narrating;
   if (state.exporting) {
     exportBtn.textContent = state.exportProgress
       ? t('export.button_running', {
@@ -763,6 +845,8 @@ function wireToolbar() {
       startExportStream();
     };
   }
+  const narrateBtn = document.getElementById('btn-narrate');
+  if (narrateBtn) narrateBtn.onclick = openNarrateModal;
   const nameInput = document.getElementById('proj-name');
   if (nameInput) {
     nameInput.onblur = () => {
@@ -818,6 +902,34 @@ function renderMain() {
             <span class="grow"></span>
             <button class="reload-btn" id="btn-reload">${t('preview.reload')}</button>
           </div>
+          <details class="talking-panel" id="talking-panel">
+            <summary>
+              <span class="st-summary-main">${t('talking.title')}</span>
+              <span class="st-summary-sub">${t('talking.summary_sub')}</span>
+              <span class="soundtrack-badge">${t('talking.badge')}</span>
+            </summary>
+            <div class="soundtrack-body">
+              <div class="st-section st-source-section" hidden>
+                <div class="st-section-title">${t('talking.source_label')}</div>
+                <p class="soundtrack-hint">${t('talking.hint')}</p>
+                <label class="talking-audio-row">
+                  <span>${t('talking.audio_mode')}</span>
+                  <select id="talking-audio-mode" class="st-voice-select">
+                    <option value="synthetic">${t('talking.audio_synthetic')}</option>
+                    <option value="original">${t('talking.audio_original')}</option>
+                  </select>
+                </label>
+                <div class="talking-actions">
+                  <input type="file" id="talking-file" accept="video/*" style="display:none" />
+                  <button class="st-generate" id="btn-talking-upload">${t('talking.upload')}</button>
+                  <button class="st-draft" id="btn-talking-transcribe">${t('talking.transcribe')}</button>
+                  <button class="st-clear" id="btn-talking-clear">${t('talking.clear')}</button>
+                  <span class="st-status" id="talking-status"></span>
+                </div>
+                <div class="talking-preview" id="talking-preview"></div>
+              </div>
+            </div>
+          </details>
           <details class="soundtrack-panel" id="soundtrack-panel">
             <summary>
               <span class="st-summary-main">${t('soundtrack.title')}</span>
@@ -825,24 +937,10 @@ function renderMain() {
               <span class="soundtrack-badge">${t('soundtrack.optional')}</span>
             </summary>
             <div class="soundtrack-body">
-              <!-- ===== Background music: its own input + generate ===== -->
-              <div class="st-section">
-                <div class="st-section-title">${t('soundtrack.music_label')}</div>
-                <div class="st-presets" id="st-music-presets">
-                  ${MUSIC_PRESETS.map((p) => `<button type="button" class="st-preset" data-prompt="${p.prompt}">${t('soundtrack.preset_' + p.key)}</button>`).join('')}
-                </div>
-                <textarea id="st-music-prompt" rows="2" placeholder="${t('soundtrack.music_placeholder')}"></textarea>
-                <div class="st-vol-row"><label>${t('soundtrack.music_volume')} <input type="range" id="st-music-vol" min="-40" max="0" value="-18" /><b id="st-music-vol-val">-18 dB</b></label></div>
-                <div class="st-section-actions">
-                  <button class="st-generate" id="btn-st-gen-music">${t('soundtrack.gen_music')}</button>
-                  <span class="st-status" id="st-music-status"></span>
-                </div>
-              </div>
-
               <!-- ===== Narration / voiceover ===== -->
               <!-- Two explicit steps so users don't confuse "write the text"
                    (AI drafts words, no audio) with "synthesize the voice"
-                   (calls MiniMax, produces an mp3). See issues #4 / #5. -->
+                   (calls the configured TTS provider, produces an mp3). See issues #4 / #5. -->
               <div class="st-section st-narration">
                 <div class="st-section-title">${t('soundtrack.narration_label')}</div>
 
@@ -854,7 +952,7 @@ function renderMain() {
                     <span class="st-narration-which" id="st-narration-which"></span>
                   </div>
                   <textarea id="st-narration-text" rows="2" placeholder="${t('soundtrack.narration_placeholder')}"></textarea>
-                  <div class="st-draft-group">
+                  <div class="st-draft-group" hidden>
                     <button type="button" class="st-draft" id="btn-st-draft-frame">${t('soundtrack.draft_frame')}</button>
                     <button type="button" class="st-draft" id="btn-st-draft-all">${t('soundtrack.draft_all')}</button>
                   </div>
@@ -871,9 +969,32 @@ function renderMain() {
                     <select id="st-narration-voice" class="st-voice-select">
                       ${narrationVoiceOptions()}
                     </select>
-                    <input id="st-narration-custom-voice" class="st-voice-select" type="text" placeholder="${t('soundtrack.custom_voice_placeholder')}" />
                     <button type="button" class="st-fit" id="btn-st-fit" title="${t('soundtrack.fit_hint')}">${t('soundtrack.fit_durations')}</button>
                   </div>
+                  <div class="st-voice-row">
+                    <span class="st-voice-label">${t('soundtrack.voice_emotion')}</span>
+                    <select id="st-cosy-emotion" class="st-voice-select">
+                      <option value="">${t('soundtrack.voice_emotion_auto')}</option>
+                      <option value="neutral">${t('soundtrack.voice_emotion_neutral')}</option>
+                      <option value="happy">${t('soundtrack.voice_emotion_happy')}</option>
+                      <option value="sad">${t('soundtrack.voice_emotion_sad')}</option>
+                      <option value="angry">${t('soundtrack.voice_emotion_angry')}</option>
+                      <option value="fearful">${t('soundtrack.voice_emotion_fearful')}</option>
+                      <option value="surprised">${t('soundtrack.voice_emotion_surprised')}</option>
+                      <option value="disgusted">${t('soundtrack.voice_emotion_disgusted')}</option>
+                    </select>
+                    <select id="st-cosy-scene" class="st-voice-select">
+                      <option value="">${t('soundtrack.voice_scene_auto')}</option>
+                      <option value="闲聊互动">${t('soundtrack.voice_scene_chat')}</option>
+                      <option value="新闻播报">${t('soundtrack.voice_scene_news')}</option>
+                      <option value="广告促销">${t('soundtrack.voice_scene_ad')}</option>
+                      <option value="比赛解说">${t('soundtrack.voice_scene_sports')}</option>
+                      <option value="语音导航">${t('soundtrack.voice_scene_nav')}</option>
+                      <option value="脱口秀表演">${t('soundtrack.voice_scene_talkshow')}</option>
+                    </select>
+                  </div>
+                  <div class="st-vol-row"><label>${t('soundtrack.voice_speed')} <input type="range" id="st-cosy-rate" min="0.5" max="2" step="0.1" value="1" /><b id="st-cosy-rate-val">1.0x</b></label></div>
+                  <div class="st-vol-row"><label>${t('soundtrack.voice_volume')} <input type="range" id="st-cosy-volume" min="0" max="100" step="1" value="50" /><b id="st-cosy-volume-val">50</b></label></div>
                   <div class="st-vol-row"><label>${t('soundtrack.narration_volume')} <input type="range" id="st-narration-vol" min="-20" max="6" value="0" /><b id="st-narration-vol-val">0 dB</b></label></div>
                   <div class="st-section-actions">
                     <button class="st-generate" id="btn-st-gen-narration">${t('soundtrack.gen_narration')}</button>
@@ -939,42 +1060,170 @@ function renderMain() {
     document.getElementById('file-input').onchange = (e) => addAttachments([...e.target.files]);
     wireDragAndPaste();
     document.getElementById('btn-reload').onclick = () => { reloadPreview(); refreshTextFields(); };
+    wireTalkingHeadPanel();
     wireSoundtrackPanel();
   }
 }
 
+function wireTalkingHeadPanel() {
+  const panel = document.getElementById('talking-panel');
+  if (!panel || !state.selected) return;
+  const fileInput = document.getElementById('talking-file');
+  const uploadBtn = document.getElementById('btn-talking-upload');
+  const transcribeBtn = document.getElementById('btn-talking-transcribe');
+  const clearBtn = document.getElementById('btn-talking-clear');
+  const statusEl = document.getElementById('talking-status');
+  const previewEl = document.getElementById('talking-preview');
+  const audioModeSelect = document.getElementById('talking-audio-mode');
+  const normalizeAudioMode = (mode) => mode === 'original' ? 'original' : 'synthetic';
+
+  const render = () => {
+    const th = state.selected?.talkingHead;
+    const assets = state.selected?.assets || [];
+    const video = th?.videoAssetId ? assets.find((a) => a.id === th.videoAssetId) : null;
+    const transcript = th?.transcriptAssetId ? assets.find((a) => a.id === th.transcriptAssetId) : null;
+    transcribeBtn.disabled = !video || state.transcribingTalkingHead;
+    clearBtn.disabled = !th;
+    if (audioModeSelect) {
+      audioModeSelect.disabled = !th;
+      audioModeSelect.value = normalizeAudioMode(th?.audioMode);
+    }
+    if (previewEl) {
+      const videoSrc = video?.path ? `/asset?path=${encodeURIComponent(video.path)}` : '';
+      previewEl.innerHTML = video
+        ? `<div class="talking-source">
+            <video controls src="${videoSrc}"></video>
+            <div class="talking-meta">
+              <b>${esc(video.metadata?.filename || 'talking-head video')}</b>
+              <span>${transcript ? t('talking.transcript_ready') : t('talking.transcript_missing')}</span>
+              <span>${normalizeAudioMode(th?.audioMode) === 'original' ? t('talking.audio_original') : t('talking.audio_synthetic')}</span>
+            </div>
+          </div>`
+        : `<div class="soundtrack-hint">${t('talking.empty')}</div>`;
+    }
+  };
+
+  uploadBtn.onclick = () => fileInput?.click();
+  if (fileInput) {
+    fileInput.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file || !state.selected) return;
+      if (statusEl) statusEl.textContent = t('talking.uploading');
+      uploadBtn.disabled = true;
+      try {
+        const r = await API.setTalkingHead(state.selected.id, file);
+        if (r.project) {
+          state.selected = r.project;
+          if (statusEl) statusEl.textContent = t('talking.uploaded');
+          render();
+          refreshProjects();
+        } else {
+          if (statusEl) statusEl.textContent = r.error || t('talking.upload_failed');
+        }
+      } catch (e2) {
+        if (statusEl) statusEl.textContent = t('talking.failed', { message: e2?.message ?? e2 });
+      } finally {
+        uploadBtn.disabled = false;
+        fileInput.value = '';
+      }
+    };
+  }
+
+  transcribeBtn.onclick = async () => {
+    if (!state.selected?.talkingHead?.videoAssetId) return;
+    state.transcribingTalkingHead = true;
+    transcribeBtn.disabled = true;
+    if (statusEl) statusEl.textContent = t('talking.transcribing');
+    try {
+      const r = await API.transcribeTalkingHead(state.selected.id, { model: 'tiny' });
+      if (r.ok && r.data.project) {
+        state.selected = r.data.project;
+        const text = (r.data.transcript?.text || '').trim();
+        if (statusEl) statusEl.textContent = t('talking.transcribed');
+        if (text) {
+          state._transcriptNarrationText = text;
+          state._narrationByFrame = {};
+          const narrationText = document.getElementById('st-narration-text');
+          if (narrationText) narrationText.value = text;
+          const narrationStatus = document.getElementById('st-narration-status');
+          if (narrationStatus) narrationStatus.textContent = t('soundtrack.transcript_loaded');
+          const ta = document.getElementById('composer-input');
+          if (ta && !ta.value.trim()) ta.value = t('talking.prompt_after_transcribe');
+        }
+        render();
+        renderComposer();
+        refreshProjects();
+      } else {
+        if (statusEl) statusEl.textContent = r.data?.error || `HTTP ${r.status}`;
+      }
+    } catch (e) {
+      if (statusEl) statusEl.textContent = t('talking.failed', { message: e?.message ?? e });
+    } finally {
+      state.transcribingTalkingHead = false;
+      render();
+    }
+  };
+
+  clearBtn.onclick = async () => {
+    if (!state.selected) return;
+    const r = await API.clearTalkingHead(state.selected.id);
+    if (r.project) {
+      state.selected = r.project;
+      if (statusEl) statusEl.textContent = t('talking.cleared');
+      render();
+      refreshProjects();
+    }
+  };
+
+  if (audioModeSelect) {
+    audioModeSelect.onchange = async () => {
+      if (!state.selected?.talkingHead) return;
+      const audioMode = normalizeAudioMode(audioModeSelect.value);
+      audioModeSelect.disabled = true;
+      try {
+        const r = await API.updateTalkingHead(state.selected.id, { audioMode });
+        if (r.project) {
+          state.selected = r.project;
+          if (statusEl) statusEl.textContent = t('talking.audio_saved');
+          render();
+          refreshProjects();
+        } else {
+          if (statusEl) statusEl.textContent = r.error || t('talking.failed', { message: 'save failed' });
+        }
+      } catch (e) {
+        if (statusEl) statusEl.textContent = t('talking.failed', { message: e?.message ?? e });
+      } finally {
+        audioModeSelect.disabled = false;
+        render();
+      }
+    };
+  }
+
+  render();
+}
+
 /**
- * Soundtrack panel: generate MiniMax music + narration, stream SSE progress,
- * preview the resulting MP3s. The generated tracks are stored on the project's
+ * Narration panel: generate configured narration, stream SSE progress, and
+ * preview the resulting MP3. The generated track is stored on the project's
  * soundtrack and mixed in automatically at export time.
  */
 function wireSoundtrackPanel() {
   const panel = document.getElementById('soundtrack-panel');
   if (!panel) return;
-  const musicPrompt = document.getElementById('st-music-prompt');
   const narrationText = document.getElementById('st-narration-text');
-  const musicVol = document.getElementById('st-music-vol');
   const narrationVol = document.getElementById('st-narration-vol');
-  const musicVolVal = document.getElementById('st-music-vol-val');
+  const cosyRate = document.getElementById('st-cosy-rate');
+  const cosyVolume = document.getElementById('st-cosy-volume');
   const narrationVolVal = document.getElementById('st-narration-vol-val');
-  const genMusicBtn = document.getElementById('btn-st-gen-music');
+  const cosyRateVal = document.getElementById('st-cosy-rate-val');
+  const cosyVolumeVal = document.getElementById('st-cosy-volume-val');
   const genNarrationBtn = document.getElementById('btn-st-gen-narration');
   const clearBtn = document.getElementById('btn-st-clear');
-  const musicStatusEl = document.getElementById('st-music-status');
   const narrationStatusEl = document.getElementById('st-narration-status');
   const previewEl = document.getElementById('st-preview');
   const draftFrameBtn = document.getElementById('btn-st-draft-frame');
   const draftAllBtn = document.getElementById('btn-st-draft-all');
   const whichEl = document.getElementById('st-narration-which');
-
-  // Music style presets: click fills the prompt textarea (editable after).
-  document.querySelectorAll('#st-music-presets .st-preset').forEach((btn) => {
-    btn.onclick = () => {
-      musicPrompt.value = btn.dataset.prompt || '';
-      document.querySelectorAll('#st-music-presets .st-preset').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-    };
-  });
 
   // ---- Per-frame narration model ----------------------------------------
   // narrationByFrame: { [graphNodeId]: text }. The textarea always shows the
@@ -1098,53 +1347,56 @@ function wireSoundtrackPanel() {
     };
   }
 
-  // Restore previously generated soundtrack (music prompt + audio previews).
+  // Restore previously generated narration preview.
   const st = state.selected?.soundtrack;
   if (st) {
-    if (st.musicPrompt) musicPrompt.value = st.musicPrompt;
-    if (typeof st.musicVolumeDb === 'number') musicVol.value = String(st.musicVolumeDb);
     if (typeof st.narrationVolumeDb === 'number') narrationVol.value = String(st.narrationVolumeDb);
     renderSoundtrackPreview(st);
   }
-  musicVolVal.textContent = `${musicVol.value} dB`;
+  if (!st?.narrationText && state._transcriptNarrationText && narrationText) {
+    narrationText.value = state._transcriptNarrationText;
+  }
   narrationVolVal.textContent = `${narrationVol.value} dB`;
-  musicVol.oninput = () => { musicVolVal.textContent = `${musicVol.value} dB`; };
+  cosyRateVal.textContent = `${Number(cosyRate.value).toFixed(1)}x`;
+  cosyVolumeVal.textContent = cosyVolume.value;
   narrationVol.oninput = () => { narrationVolVal.textContent = `${narrationVol.value} dB`; };
+  cosyRate.oninput = () => { cosyRateVal.textContent = `${Number(cosyRate.value).toFixed(1)}x`; };
+  cosyVolume.oninput = () => { cosyVolumeVal.textContent = cosyVolume.value; };
 
   clearBtn.onclick = async () => {
     if (!state.selected) return;
     await fetch(`/api/projects/${state.selected.id}/soundtrack`, { method: 'DELETE' });
-    musicPrompt.value = '';
     narrationText.value = '';
     previewEl.innerHTML = '';
-    if (musicStatusEl) musicStatusEl.textContent = '';
     if (narrationStatusEl) narrationStatusEl.textContent = '';
     if (state.selected) delete state.selected.soundtrack;
   };
 
-  // Music and narration generate INDEPENDENTLY. `kind` decides which part of
-  // the generate-audio payload we send + which button/status to drive.
-  async function runGenerate(kind /* 'music' | 'narration' */) {
+  async function runGenerateNarration() {
     if (!state.selected) return;
-    const btn = kind === 'music' ? genMusicBtn : genNarrationBtn;
-    const statusEl = kind === 'music' ? musicStatusEl : narrationStatusEl;
+    const btn = genNarrationBtn;
+    const statusEl = narrationStatusEl;
     const payload = {};
-    if (kind === 'music') {
-      const mp = musicPrompt.value.trim();
-      if (!mp) { if (statusEl) statusEl.textContent = t('soundtrack.empty_music'); return; }
-      payload.music = { prompt: mp, instrumental: true, volumeDb: Number(musicVol.value) };
-    } else {
-      // Stitch every frame's line in order into one narration track.
-      const stitched = sortedFrames
-        .map((f) => (state._narrationByFrame[f.graphNodeId] || '').trim())
-        .filter((s) => s.length > 0).join('\n');
-      const nt = stitched || narrationText.value.trim();
-      if (!nt) { if (statusEl) statusEl.textContent = t('soundtrack.empty_narration'); return; }
-      const voiceSel = document.getElementById('st-narration-voice');
-      const customVoice = document.getElementById('st-narration-custom-voice')?.value.trim();
-      const voiceId = customVoice || voiceSel?.value;
-      payload.narration = { text: nt, volumeDb: Number(narrationVol.value), byFrame: state._narrationByFrame, ...(voiceId && { voiceId }) };
-    }
+    // Stitch every frame's line in order into one narration track.
+    const stitched = sortedFrames
+      .map((f) => (state._narrationByFrame[f.graphNodeId] || '').trim())
+      .filter((s) => s.length > 0).join('\n');
+    const nt = stitched || narrationText.value.trim();
+    if (!nt) { if (statusEl) statusEl.textContent = t('soundtrack.empty_narration'); return; }
+    const voiceSel = document.getElementById('st-narration-voice');
+    const emotion = document.getElementById('st-cosy-emotion')?.value.trim();
+    const scene = document.getElementById('st-cosy-scene')?.value.trim();
+    const voiceId = voiceSel?.value;
+    payload.narration = {
+      text: nt,
+      volumeDb: Number(narrationVol.value),
+      byFrame: state._narrationByFrame,
+      rate: Number(cosyRate.value),
+      volume: Number(cosyVolume.value),
+      ...(voiceId && { voiceId }),
+      ...(emotion && { emotion }),
+      ...(scene && { scene }),
+    };
 
     const label = btn?.textContent;
     if (btn) btn.disabled = true;
@@ -1182,7 +1434,7 @@ function wireSoundtrackPanel() {
           let ev;
           try { ev = JSON.parse(line.slice(6)); } catch { continue; }
           if (ev.type === 'audio_progress' && statusEl) {
-            statusEl.textContent = ev.stage === 'music' ? t('soundtrack.progress_music') : t('soundtrack.progress_narration');
+            statusEl.textContent = t('soundtrack.progress_narration');
           } else if (ev.type === 'audio_done') {
             if (statusEl) statusEl.textContent = t('soundtrack.done');
             if (ev.project) state.selected = ev.project;
@@ -1199,8 +1451,7 @@ function wireSoundtrackPanel() {
       clearBtn.disabled = false;
     }
   }
-  if (genMusicBtn) genMusicBtn.onclick = () => runGenerate('music');
-  if (genNarrationBtn) genNarrationBtn.onclick = () => runGenerate('narration');
+  if (genNarrationBtn) genNarrationBtn.onclick = runGenerateNarration;
 }
 
 function renderSoundtrackPreview(soundtrack) {
@@ -1212,9 +1463,7 @@ function renderSoundtrackPreview(soundtrack) {
     return a?.path ? `/asset?path=${encodeURIComponent(a.path)}` : null;
   };
   const blocks = [];
-  const musicSrc = soundtrack.musicAssetId && srcFor(soundtrack.musicAssetId);
   const narrSrc = soundtrack.narrationAssetId && srcFor(soundtrack.narrationAssetId);
-  if (musicSrc) blocks.push(`<div class="st-track"><span>${t('soundtrack.music_ready')}</span><audio controls src="${musicSrc}"></audio></div>`);
   if (narrSrc) blocks.push(`<div class="st-track"><span>${t('soundtrack.narration_ready')}</span><audio controls src="${narrSrc}"></audio></div>`);
   previewEl.innerHTML = blocks.join('');
 }
@@ -1306,8 +1555,9 @@ function renderComposer() {
   if (!ta) return;
   const availableAgents = state.agents.filter(a => a.available);
   const agentsKnown = state.agents.length > 0;
+  const canUseLocalTranscript = !!p?.talkingHead?.transcriptAssetId;
   const canType = !!p && !state.composing;
-  const canSend = !!(p && availableAgents.length > 0 && !state.composing);
+  const canSend = !!(p && (availableAgents.length > 0 || canUseLocalTranscript) && !state.composing);
   ta.disabled = !canType;
   sendBtn.disabled = !canSend;
 
@@ -1342,6 +1592,7 @@ function renderComposer() {
 
   ta.placeholder = !p ? t('composer.placeholder.no_project')
     : !agentsKnown ? t('composer.placeholder.detecting_agents')
+    : availableAgents.length === 0 && canUseLocalTranscript ? t('composer.placeholder.local_transcript')
     : availableAgents.length === 0 ? t('composer.placeholder.no_agent')
     : state.iterateFocusFrameId ? t('composer.placeholder.focus')
     : !p.templateId ? t('composer.placeholder.no_template')
@@ -2661,6 +2912,205 @@ async function sendMessage() {
   }
 }
 
+// ============== one-click narrate-to-video modal ==============
+function currentAgentId() {
+  return state.selected?.agentId
+    ?? (state.agents.find((a) => a.available && a.id !== 'amr')?.id ?? null);
+}
+
+function openNarrateModal() {
+  if (!state.selected) return;
+  // Narration needs both an agent (for storyboard) and a TTS key.
+  if (!currentAgentId()) { toast(t('narrate.agent_required'), 'error'); return; }
+  const modal = document.getElementById('narrate-modal');
+  if (!modal) return;
+  modal.classList.add('show');
+
+  // Populate the voice <select> the same way the soundtrack panel does.
+  const voiceSel = document.getElementById('narrate-voice');
+  if (voiceSel) {
+    voiceSel.innerHTML = narrationVoiceOptions();
+    if (state.defaultNarrationVoiceId && [...voiceSel.options].some((o) => o.value === state.defaultNarrationVoiceId)) {
+      voiceSel.value = state.defaultNarrationVoiceId;
+    }
+  }
+
+  // Reset to the script tab + cleared inputs each open.
+  setNarrateTab('script');
+  const scriptEl = document.getElementById('narrate-script');
+  const topicEl = document.getElementById('narrate-topic-input');
+  if (scriptEl) scriptEl.value = '';
+  if (topicEl) topicEl.value = '';
+  const progressEl = document.getElementById('narrate-progress');
+  if (progressEl) { progressEl.hidden = true; progressEl.innerHTML = ''; }
+  const startBtn = document.getElementById('narrate-start');
+  if (startBtn) { startBtn.disabled = false; startBtn.textContent = t('narrate.start'); }
+
+  // Wire tab switching + close + start once (idempotent via clone-replace).
+  const tabScript = document.getElementById('narrate-tab-script');
+  const tabTopic = document.getElementById('narrate-tab-topic');
+  if (tabScript && !tabScript.dataset.wired) {
+    tabScript.onclick = () => setNarrateTab('script');
+    tabScript.dataset.wired = '1';
+  }
+  if (tabTopic && !tabTopic.dataset.wired) {
+    tabTopic.onclick = () => setNarrateTab('topic');
+    tabTopic.dataset.wired = '1';
+  }
+  const closeBtn = document.getElementById('narrate-close');
+  if (closeBtn && !closeBtn.dataset.wired) {
+    closeBtn.onclick = closeNarrateModal;
+    closeBtn.dataset.wired = '1';
+  }
+  if (startBtn && !startBtn.dataset.wired) {
+    startBtn.onclick = runNarrate;
+    startBtn.dataset.wired = '1';
+  }
+}
+
+function setNarrateTab(which) {
+  const tabScript = document.getElementById('narrate-tab-script');
+  const tabTopic = document.getElementById('narrate-tab-topic');
+  const scriptEl = document.getElementById('narrate-script');
+  const topicEl = document.getElementById('narrate-topic-input');
+  const isScript = which === 'script';
+  if (tabScript) tabScript.classList.toggle('active', isScript);
+  if (tabTopic) tabTopic.classList.toggle('active', !isScript);
+  if (scriptEl) scriptEl.hidden = !isScript;
+  if (topicEl) topicEl.hidden = isScript;
+}
+
+function closeNarrateModal() {
+  const modal = document.getElementById('narrate-modal');
+  if (modal) modal.classList.remove('show');
+}
+
+function narrateLog(html, cls) {
+  const progressEl = document.getElementById('narrate-progress');
+  if (!progressEl) return;
+  progressEl.hidden = false;
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.innerHTML = html;
+  progressEl.appendChild(line);
+  progressEl.scrollTop = progressEl.scrollHeight;
+}
+
+async function runNarrate() {
+  if (!state.selected) return;
+  const agentId = currentAgentId();
+  if (!agentId) { toast(t('narrate.agent_required'), 'error'); return; }
+
+  const tabScript = document.getElementById('narrate-tab-script');
+  const isTopic = tabScript ? !tabScript.classList.contains('active') : false;
+  const scriptEl = document.getElementById('narrate-script');
+  const topicEl = document.getElementById('narrate-topic-input');
+  const voiceSel = document.getElementById('narrate-voice');
+  const startBtn = document.getElementById('narrate-start');
+  const projectId = state.selected.id;
+
+  const script = scriptEl?.value.trim() ?? '';
+  const topic = topicEl?.value.trim() ?? '';
+  const voiceId = voiceSel?.value || undefined;
+  if (isTopic ? !topic : !script) { return; }
+
+  const payload = {
+    mode: isTopic ? 'topic' : 'script',
+    agentId,
+    ...(voiceId && { voiceId }),
+    ...(isTopic ? { topic } : { script }),
+  };
+
+  // Lock the UI for the duration of the run.
+  state.narrating = true;
+  renderToolbar();
+  if (startBtn) { startBtn.disabled = true; startBtn.textContent = t('narrate.running'); }
+  const progressEl = document.getElementById('narrate-progress');
+  if (progressEl) { progressEl.hidden = false; progressEl.innerHTML = ''; }
+
+  let res;
+  try {
+    res = await fetch(`/api/projects/${projectId}/narrate`, {
+      method: 'POST',
+      headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    narrateLog(esc(t('narrate.failed', { message: (e?.message ?? e) })), 'err');
+    finishNarrate(false);
+    return;
+  }
+  if (!res.ok || !res.body) {
+    narrateLog(esc(t('narrate.failed', { message: `HTTP ${res.status}` })), 'err');
+    finishNarrate(false);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let mp4Filename = null;
+  let audioDur = null;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() ?? '';
+      for (const line of events) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        if (ev.type === 'narrate_progress') {
+          narrateLog(esc(t(ev.message_key ?? ev.message ?? '')));
+        } else if (ev.type === 'narrate_script') {
+          // topic-mode: surface the agent-written script so the user sees it.
+          narrateLog(`<b>${esc(t('narrate.tab_script'))}</b>: ${esc(ev.script.slice(0, 120))}${ev.script.length > 120 ? '…' : ''}`);
+        } else if (ev.type === 'narrate_graph') {
+          narrateLog(`✓ ${ev.frame_count} frames`);
+        } else if (ev.type === 'narrate_frame_done') {
+          narrateLog(`✓ ${esc(t('narrate.progress.frames'))} ${ev.order + 1}/${ev.total}`);
+        } else if (ev.type === 'narrate_audio_done') {
+          narrateLog(esc(t('soundtrack.done')));
+        } else if (ev.type === 'narrate_export_progress') {
+          // Keep the export line as the live tail rather than stacking many.
+          narrateLog(`⏵ ${formatPct(ev.pct)}% · ${esc(ev.stage)}`);
+        } else if (ev.type === 'narrate_done') {
+          mp4Filename = ev.mp4_filename;
+          audioDur = ev.audio_duration_sec;
+          if (ev.project) state.selected = ev.project;
+        } else if (ev.type === 'narrate_failed') {
+          narrateLog(esc(t('narrate.failed', { message: ev.message })), 'err');
+        }
+      }
+    }
+  } catch (e) {
+    narrateLog(esc(t('narrate.failed', { message: (e?.message ?? e) })), 'err');
+    finishNarrate(false);
+    return;
+  }
+
+  if (mp4Filename) {
+    const sec = Number.isFinite(audioDur) ? Math.round(audioDur) : null;
+    narrateLog(esc(sec != null ? t('narrate.done', { seconds: sec }) : t('narrate.done_no_seconds')), 'ok');
+    // Refresh frames/preview so the new storyboard + narration show up.
+    await selectProject(state.selected.id);
+  }
+  finishNarrate(!!mp4Filename);
+}
+
+function finishNarrate(ok) {
+  state.narrating = false;
+  renderToolbar();
+  const startBtn = document.getElementById('narrate-start');
+  if (startBtn) { startBtn.disabled = false; startBtn.textContent = t('narrate.start'); }
+  if (ok) {
+    // Auto-close shortly after a successful export so the user lands on the result.
+    setTimeout(closeNarrateModal, 1500);
+  }
+}
+
 // ============== gallery modal ==============
 function openGallery() {
   if (!state.selected) return;
@@ -2682,15 +3132,15 @@ function openGallery() {
     // backend couldn't find a poster file (poster_url null).
     const inner =
       t.preview_mode === 'poster' && t.poster_url
-        ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(t.name ?? t.id)}" loading="lazy" />`
+        ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(templateDisplayName(t) || t.id)}" loading="lazy" />`
         : `<iframe sandbox="allow-scripts allow-same-origin" src="/template-asset/${esc(t.id)}/${esc(entry)}" loading="lazy"></iframe>`;
     return `<div class="gallery-card${sel}" data-id="${t.id}">
       <div class="preview ${portrait ? 'portrait' : ''}" data-portrait="${portrait}">
         ${inner}
       </div>
       <div class="meta">
-        <div class="name">${esc(t.name)}</div>
-        <div class="desc">${esc(t.description ?? '')}</div>
+        <div class="name">${esc(templateDisplayName(t))}</div>
+        <div class="desc">${esc(templateDescription(t))}</div>
         <div class="tags">${tags}</div>
       </div>
     </div>`;
@@ -2760,8 +3210,8 @@ function openTemplatePreviewModal(tpl) {
   if (!modal) return;
   modal.classList.add('show');
 
-  document.getElementById('tpl-preview-name').textContent = tpl.name ?? tpl.id;
-  document.getElementById('tpl-preview-desc').textContent = tpl.description ?? '';
+  document.getElementById('tpl-preview-name').textContent = templateDisplayName(tpl) || tpl.id;
+  document.getElementById('tpl-preview-desc').textContent = templateDescription(tpl);
   const dur = tpl?.output?.duration?.default_sec ?? tpl?.output?.duration?.max_sec ?? '?';
   const fps = tpl?.output?.fps?.default ?? '?';
   const aspect = (tpl?.output?.resolution?.supported_aspects ?? [])[0] ?? '16:9';
@@ -2826,7 +3276,7 @@ function openTemplatePreviewModal(tpl) {
     // before replacing — the user may have been just exploring.
     const current = state.selected.templateId;
     if (current && current !== tpl.id) {
-      if (!confirm(t('tpl_preview.replace_confirm', { name: tpl.name ?? tpl.id }))) return;
+      if (!confirm(t('tpl_preview.replace_confirm', { name: templateDisplayName(tpl) || tpl.id }))) return;
     }
     useBtn.disabled = true;
     try {
@@ -2834,7 +3284,14 @@ function openTemplatePreviewModal(tpl) {
       closeTemplatePreviewModal();
       closeGallery();
       await selectProject(state.selected.id);
-      toast(t('tpl_preview.applied', { name: tpl.name ?? tpl.id }), 'success');
+      toast(t('tpl_preview.applied', { name: templateDisplayName(tpl) || tpl.id }), 'success');
+    } catch (e) {
+      // If setTemplate or selectProject fails, ensure the UI is still usable.
+      closeTemplatePreviewModal();
+      closeGallery();
+      // Re-render the main view in case selectProject partially updated state.
+      if (state.selected) { renderMain(); renderToolbar(); }
+      toast(`⚠️ ${e?.message ?? e}`, 'error');
     } finally {
       useBtn.disabled = false;
     }
@@ -2930,6 +3387,13 @@ function wireModals() {
   document.getElementById('gallery-modal').addEventListener('click', e => {
     if (e.target.id === 'gallery-modal') closeGallery();
   });
+  // Template preview
+  const tplPreviewModal = document.getElementById('tpl-preview-modal');
+  if (tplPreviewModal) {
+    tplPreviewModal.addEventListener('click', (e) => {
+      if (e.target.id === 'tpl-preview-modal') closeTemplatePreviewModal();
+    });
+  }
   // Settings
   const settingsModal = document.getElementById('settings-modal');
   if (settingsModal) {
@@ -2947,6 +3411,7 @@ function wireModals() {
   }
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      closeTemplatePreviewModal();
       closeNewModal();
       closeGallery();
       closeSettingsModal();
@@ -3026,10 +3491,11 @@ async function renderSettingsAudio(panel) {
       <label class="audio-field" id="bailian-model-field">
         <span>${esc(t('settings.audio.model'))}</span>
         <select id="bailian-model">
-          <option value="MiniMax/speech-02-turbo">MiniMax/speech-02-turbo</option>
-          <option value="MiniMax/speech-02-hd">MiniMax/speech-02-hd</option>
-          <option value="MiniMax/speech-2.8-turbo">MiniMax/speech-2.8-turbo</option>
-          <option value="MiniMax/speech-2.8-hd">MiniMax/speech-2.8-hd</option>
+          <option value="cosyvoice-v3-flash">cosyvoice-v3-flash</option>
+          <option value="cosyvoice-v3-plus">cosyvoice-v3-plus</option>
+          <option value="cosyvoice-v3.5-flash">cosyvoice-v3.5-flash</option>
+          <option value="cosyvoice-v3.5-plus">cosyvoice-v3.5-plus</option>
+          <option value="cosyvoice-v2">cosyvoice-v2</option>
         </select>
       </label>
       <label class="audio-field">
@@ -3057,24 +3523,25 @@ async function renderSettingsAudio(panel) {
         <h4>${esc(t('settings.audio.clone_title'))}</h4>
         <p class="panel-sub">${esc(t('settings.audio.clone_subtitle'))}</p>
         <div class="voice-clone-grid">
-          <label class="audio-field">
+          <label class="audio-field voice-clone-wide">
             <span>${esc(t('settings.audio.clone_name'))}</span>
-            <input type="text" id="clone-voice-name" placeholder="${esc(t('settings.audio.clone_name_placeholder'))}" />
-          </label>
-          <label class="audio-field">
-            <span>${esc(t('settings.audio.clone_id'))}</span>
-            <input type="text" id="clone-voice-id" placeholder="my-narrator" />
+            <input type="text" id="clone-voice-name" value="${esc(t('settings.audio.clone_name_default'))}" />
           </label>
           <label class="audio-field voice-clone-wide">
             <span>${esc(t('settings.audio.clone_audio_url'))}</span>
-            <input type="url" id="clone-audio-url" placeholder="https://example.com/voice.wav" />
+            <input type="url" id="clone-audio-url" value="${esc(DEFAULT_CLONE_AUDIO_URL)}" />
           </label>
           <label class="audio-field voice-clone-wide">
-            <span>${esc(t('settings.audio.clone_preview_text'))}</span>
-            <input type="text" id="clone-preview-text" value="${esc(t('settings.audio.clone_preview_default'))}" />
+            <span>${esc(t('settings.audio.clone_language'))}</span>
+            <select id="clone-language-hint">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+            </select>
           </label>
         </div>
-        <div class="audio-actions">
+        <div class="voice-record-box">
           <button class="audio-save primary-action" id="clone-voice-create">${esc(t('settings.audio.clone_create'))}</button>
           <span class="audio-save-state" id="clone-voice-state"></span>
         </div>
@@ -3115,8 +3582,8 @@ async function renderSettingsAudio(panel) {
   const refresh = async () => {
     try {
       const s = await fetch('/api/config/narration').then((r) => r.json());
-      providerInput.value = s.provider || 'minimax';
-      modelInput.value = s.model || 'MiniMax/speech-02-turbo';
+      providerInput.value = s.provider || 'bailian';
+      modelInput.value = s.model || 'cosyvoice-v3-flash';
       syncProviderFields(false);
       if (s.configured) {
         const src = s.source === 'env' ? t('settings.audio.source_env') : t('settings.audio.source_config');
@@ -3148,7 +3615,7 @@ async function renderSettingsAudio(panel) {
         <div class="voice-library-main">
           <input class="voice-library-name" value="${esc(voice.name)}" aria-label="${esc(t('settings.audio.clone_name'))}" />
           <code>${esc(voice.id)}</code>
-          <span>${esc(voice.model.replace('MiniMax/', ''))}</span>
+          <span>${esc(voice.model)}</span>
         </div>
         <div class="voice-library-actions">
           ${voice.id === state.defaultNarrationVoiceId ? `<b>${esc(t('settings.audio.voice_default'))}</b>` : `<button data-action="default">${esc(t('settings.audio.voice_set_default'))}</button>`}
@@ -3186,38 +3653,38 @@ async function renderSettingsAudio(panel) {
   };
   renderVoiceLibrary();
 
-  panel.querySelector('#clone-voice-create').onclick = async () => {
-    const button = panel.querySelector('#clone-voice-create');
-    const status = panel.querySelector('#clone-voice-state');
-    const body = {
-      name: panel.querySelector('#clone-voice-name').value.trim(),
-      id: panel.querySelector('#clone-voice-id').value.trim(),
-      audioUrl: panel.querySelector('#clone-audio-url').value.trim(),
-      previewText: panel.querySelector('#clone-preview-text').value.trim(),
-      model: modelInput.value,
-    };
-    if (!body.id || !body.audioUrl || !body.previewText) {
-      status.textContent = t('settings.audio.clone_required');
+  const createVoiceBtn = panel.querySelector('#clone-voice-create');
+  const cloneStatus = panel.querySelector('#clone-voice-state');
+  const clonePreview = panel.querySelector('#clone-preview');
+
+  createVoiceBtn.onclick = async () => {
+    const nameInput = panel.querySelector('#clone-voice-name');
+    const audioUrlInput = panel.querySelector('#clone-audio-url');
+    const name = nameInput.value.trim() || t('settings.audio.clone_name_default');
+    const audioUrl = audioUrlInput.value.trim();
+    if (!audioUrl) {
+      cloneStatus.textContent = t('settings.audio.clone_required');
       return;
     }
-    button.disabled = true;
-    status.textContent = t('settings.audio.clone_creating');
+    createVoiceBtn.disabled = true;
+    cloneStatus.textContent = t('settings.audio.clone_creating');
+    clonePreview.innerHTML = `<audio controls src="${esc(audioUrl)}"></audio>`;
     try {
-      const response = await API.cloneNarrationVoice(body);
+      const response = await API.cloneNarrationVoiceFromUrl({
+        name,
+        audioUrl,
+        model: modelInput.value,
+        languageHint: panel.querySelector('#clone-language-hint').value,
+      });
       if (!response.ok) throw new Error(response.data.error || `HTTP ${response.status}`);
       applyVoiceResult(response.data);
       renderVoiceLibrary();
-      status.textContent = t('settings.audio.clone_created');
-      const preview = panel.querySelector('#clone-preview');
-      preview.innerHTML = response.data.previewDataUrl
-        ? `<audio controls src="${response.data.previewDataUrl}"></audio>`
-        : '';
-      panel.querySelector('#clone-voice-name').value = '';
-      panel.querySelector('#clone-voice-id').value = '';
+      cloneStatus.textContent = t('settings.audio.clone_created');
+      nameInput.value = t('settings.audio.clone_name_default');
     } catch (error) {
-      status.textContent = t('settings.audio.clone_failed', { message: error?.message ?? error });
+      cloneStatus.textContent = t('settings.audio.clone_failed', { message: error?.message ?? error });
     } finally {
-      button.disabled = false;
+      createVoiceBtn.disabled = false;
     }
   };
 
@@ -3456,4 +3923,3 @@ init().catch((e) => {
   console.error('[hv-studio] init failed:', e);
   try { toast(`init 失败：${e.message}`, 'error'); } catch {}
 });
-

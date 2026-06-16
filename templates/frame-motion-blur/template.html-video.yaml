@@ -1,0 +1,80 @@
+spec_version: 1
+id: frame-motion-blur
+name: Motion Blur
+description: >
+  A Hyperframes velocity showcase demonstrating motion blur across shape and
+  text rows. Five speed bands move from slow drift to extreme warp, using SVG
+  filters, ghost trails, and GSAP-controlled x motion.
+
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: index.html
+
+category: transition
+subcategory: motion-effect
+tags: [motion-blur, velocity, gsap, effect, transition, text, kinetic]
+
+best_for:
+  - "Explaining speed, velocity, or motion systems"
+  - "Kinetic typography and transition effect demos"
+  - "Developer-facing animation technique showcases"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9"]
+  fps:
+    default: 30
+    supported: [30, 60]
+  duration:
+    type: fixed
+    min_sec: 4
+    max_sec: 4
+    default_sec: 4
+  alpha: false
+  audio: { supported: false }
+
+inputs:
+  schema:
+    type: object
+    properties: {}
+  examples: []
+
+license:
+  spdx: Apache-2.0
+  attribution_required: true
+  redistribution_allowed: true
+  commercial_use: true
+  notes: "Forked from heygen-com/hyperframes registry/examples/motion-blur (Apache-2.0)."
+
+provenance:
+  origin:
+    name: "none"
+    kind: none
+    reference: "Hyperframes original example; no external design studio lineage recorded."
+  via_skill:
+    name: "hyperframes registry/examples/motion-blur"
+    author: "heygen-com / Hyperframes"
+    url: https://github.com/heygen-com/hyperframes/tree/main/registry/examples/motion-blur
+    license: Apache-2.0
+    source_file: index.html
+  transformation: >
+    Imported as a first-class html-video template with metadata, gallery poster,
+    and attribution; source HTML is preserved from the Hyperframes example.
+
+assets_attribution:
+  - name: "hyperframes registry/examples/motion-blur"
+    license: "Apache-2.0"
+    author: "heygen-com / Hyperframes"
+    url: "https://github.com/heygen-com/hyperframes/tree/main/registry/examples/motion-blur"
+
+author:
+  name: "heygen-com / Hyperframes"
+  url: "https://github.com/heygen-com/hyperframes"
+
+version: "0.1.0"
+
+preview:
+  poster: poster.svg

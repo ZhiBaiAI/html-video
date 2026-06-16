@@ -108,7 +108,10 @@ export class TemplateRegistry {
         ...t.tags,
         ...t.best_for,
         t.name,
+        t.name_zh ?? '',
         t.description,
+        t.description_zh ?? '',
+        t.description_en ?? '',
         t.category,
         t.subcategory ?? '',
       ]

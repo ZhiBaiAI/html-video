@@ -55,6 +55,17 @@ export async function runDoctor(ctx: CliContext): Promise<void> {
     });
   }
 
+  if (which('whisper')) {
+    checks.push({ name: 'whisper', status: 'ok', value: version('whisper') ?? 'installed' });
+  } else {
+    checks.push({
+      name: 'whisper',
+      status: 'missing',
+      install_hint: 'pipx install openai-whisper  (or install openai-whisper in your Python environment)',
+      detail: 'Required only for talking-head video transcription.',
+    });
+  }
+
   // chromium / chrome (for HF puppeteer)
   const chromePaths = [
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

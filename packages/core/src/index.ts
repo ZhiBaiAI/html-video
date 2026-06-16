@@ -9,6 +9,7 @@ export { AssetStore } from './asset-store.js';
 export type { AssetStoreOptions } from './asset-store.js';
 export { EngineRegistry, TemplateRegistry, ProjectStore } from './registry.js';
 export { ProjectOrchestrator } from './project.js';
+export { probeMediaDurationSec } from './project.js';
 export type {
   CreateProjectInput,
   ProjectOrchestratorDeps,
@@ -16,17 +17,16 @@ export type {
 export {
   resolveMinimaxCredentials,
   generateTts,
-  generateMusic,
 } from './minimax.js';
 export type { MinimaxCredentials, MinimaxAudioResult } from './minimax.js';
 export {
-  BAILIAN_MINIMAX_TTS_MODELS,
-  cloneBailianMinimaxVoice,
+  BAILIAN_COSYVOICE_TTS_MODELS,
+  cloneBailianCosyVoice,
   generateBailianTts,
   resolveBailianCredentials,
 } from './bailian.js';
 export type {
+  BailianCosyVoiceTtsModel,
   BailianCredentials,
-  BailianMinimaxTtsModel,
   BailianVoiceCloneResult,
 } from './bailian.js';

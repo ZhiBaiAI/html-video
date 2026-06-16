@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="森林编辑部 Editorial Forest poster">
+  <rect width="1600" height="900" fill="#efe7d4"/>
+  <rect x="92" y="88" width="520" height="724" fill="#2e4a2a"/>
+  <rect x="612" y="88" width="896" height="724" fill="#efe7d4" stroke="#2e4a2a" stroke-width="6"/>
+  <circle cx="352" cy="255" r="118" fill="#e89cb1"/>
+  <text x="188" y="535" font-family="Georgia, serif" font-size="112" font-weight="500" fill="#e89cb1">森林</text>
+  <text x="188" y="650" font-family="Georgia, serif" font-size="92" font-weight="500" fill="#e89cb1">编辑部</text>
+  <text x="700" y="292" font-family="Georgia, serif" font-size="94" font-weight="500" fill="#2e4a2a">Editorial</text>
+  <text x="700" y="398" font-family="Georgia, serif" font-size="94" font-weight="500" fill="#2e4a2a">Forest</text>
+  <line x1="700" y1="472" x2="1380" y2="472" stroke="#2e4a2a" stroke-width="5"/>
+  <text x="700" y="555" font-family="Arial, sans-serif" font-size="35" fill="#1a1a17">Green / pink / cream editorial system</text>
+  <text x="700" y="615" font-family="monospace" font-size="28" fill="#2e4a2a">Source Serif 4 · JetBrains Mono · hairline rules</text>
+</svg>
