@@ -1947,7 +1947,8 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           return res.end('missing ?path');
         }
         const safe = resolve(p);
-        if (!safe.includes('/.html-video/projects/')) {
+        const projectsDir = resolve(join(ctx.projectRoot, '.html-video', 'projects'));
+        if (!safe.startsWith(projectsDir + '/') && !safe.startsWith(projectsDir + '\\')) {
           res.writeHead(403);
           return res.end('forbidden');
         }
@@ -1960,7 +1961,8 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       if (voiceSampleMatch?.[1] && m === 'GET') {
         const samplesDir = voiceCloneSamplesDir(ctx.projectRoot);
         const safe = resolve(samplesDir, basename(voiceSampleMatch[1]));
-        if (!safe.startsWith(resolve(samplesDir) + '/')) {
+        const resolvedSamplesDir = resolve(samplesDir);
+        if (!safe.startsWith(resolvedSamplesDir + '/') && !safe.startsWith(resolvedSamplesDir + '\\')) {
           res.writeHead(403);
           return res.end('forbidden');
         }

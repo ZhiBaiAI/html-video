@@ -2935,6 +2935,34 @@ function openNarrateModal() {
     }
   }
 
+  // Populate the template <select> with all available templates.
+  // Pre-select the project's current template so the user can keep it or switch.
+  const tplSel = document.getElementById('narrate-template');
+  if (tplSel) {
+    const currentTplId = state.selected?.templateId;
+    const noneOpt = `<option value="">${esc(t('narrate.template_none'))}</option>`;
+    const tplOpts = (state.templates || []).map((tpl) => {
+      const name = templateDisplayName(tpl) || tpl.id;
+      const selected = tpl.id === currentTplId ? ' selected' : '';
+      return `<option value="${esc(tpl.id)}"${selected}>${esc(name)}</option>`;
+    }).join('');
+    tplSel.innerHTML = noneOpt + tplOpts;
+    if (!currentTplId) tplSel.value = '';
+  }
+
+  // Pre-select aspect based on the project's current resolution.
+  const aspectSel = document.getElementById('narrate-aspect');
+  if (aspectSel && state.selected) {
+    const res = state.selected.preferences?.resolution;
+    if (res?.width && res?.height) {
+      const ratio = res.width / res.height;
+      if (Math.abs(ratio - 9 / 16) < 0.08) aspectSel.value = '9:16';
+      else if (Math.abs(ratio - 1) < 0.08) aspectSel.value = '1:1';
+      else if (Math.abs(ratio - 4 / 5) < 0.08) aspectSel.value = '4:5';
+      else aspectSel.value = '16:9';
+    }
+  }
+
   // Reset to the script tab + cleared inputs each open.
   setNarrateTab('script');
   const scriptEl = document.getElementById('narrate-script');
@@ -3012,12 +3040,18 @@ async function runNarrate() {
   const script = scriptEl?.value.trim() ?? '';
   const topic = topicEl?.value.trim() ?? '';
   const voiceId = voiceSel?.value || undefined;
+  const tplSelEl = document.getElementById('narrate-template');
+  const aspectSelEl = document.getElementById('narrate-aspect');
+  const templateId = tplSelEl?.value || undefined;
+  const aspect = aspectSelEl?.value || '16:9';
   if (isTopic ? !topic : !script) { return; }
 
   const payload = {
     mode: isTopic ? 'topic' : 'script',
     agentId,
+    aspect,
     ...(voiceId && { voiceId }),
+    ...(templateId && { templateId }),
     ...(isTopic ? { topic } : { script }),
   };
 
@@ -3261,6 +3295,13 @@ function openTemplatePreviewModal(tpl) {
   const useBtn = document.getElementById('tpl-preview-use');
   const cancelBtn = document.getElementById('tpl-preview-cancel');
   const closeBtn = document.getElementById('tpl-preview-close');
+  const confirmBar = document.getElementById('tpl-preview-confirm-bar');
+  const confirmMsg = document.getElementById('tpl-preview-confirm-msg');
+  const confirmYes = document.getElementById('tpl-preview-confirm-yes');
+  const confirmNo = document.getElementById('tpl-preview-confirm-no');
+
+  // Hide the confirm bar when opening the modal.
+  if (confirmBar) confirmBar.hidden = true;
 
   // If the project already has this template applied, downgrade the primary
   // action to a no-op "in use" label so the user doesn't reapply needlessly.
@@ -3270,14 +3311,11 @@ function openTemplatePreviewModal(tpl) {
     : t('tpl_preview.use');
   useBtn.disabled = isCurrent;
 
-  useBtn.onclick = async () => {
+  // Core apply logic — called from useBtn (no existing template) or from
+  // the inline confirm bar (replacing an existing template).
+  const doApply = async () => {
     if (!state.selected) return;
-    // If the project already has a different template applied, confirm
-    // before replacing — the user may have been just exploring.
-    const current = state.selected.templateId;
-    if (current && current !== tpl.id) {
-      if (!confirm(t('tpl_preview.replace_confirm', { name: templateDisplayName(tpl) || tpl.id }))) return;
-    }
+    if (confirmBar) confirmBar.hidden = true;
     useBtn.disabled = true;
     try {
       await API.setTemplate(state.selected.id, tpl.id);
@@ -3286,16 +3324,28 @@ function openTemplatePreviewModal(tpl) {
       await selectProject(state.selected.id);
       toast(t('tpl_preview.applied', { name: templateDisplayName(tpl) || tpl.id }), 'success');
     } catch (e) {
-      // If setTemplate or selectProject fails, ensure the UI is still usable.
       closeTemplatePreviewModal();
       closeGallery();
-      // Re-render the main view in case selectProject partially updated state.
       if (state.selected) { renderMain(); renderToolbar(); }
       toast(`⚠️ ${e?.message ?? e}`, 'error');
     } finally {
       useBtn.disabled = false;
     }
   };
+
+  useBtn.onclick = () => {
+    if (!state.selected) return;
+    const current = state.selected.templateId;
+    if (current && current !== tpl.id) {
+      // Show the inline confirm bar instead of blocking confirm().
+      if (confirmMsg) confirmMsg.textContent = t('tpl_preview.replace_confirm', { name: templateDisplayName(tpl) || tpl.id });
+      if (confirmBar) confirmBar.hidden = false;
+      return;
+    }
+    doApply();
+  };
+  if (confirmYes) confirmYes.onclick = doApply;
+  if (confirmNo) confirmNo.onclick = () => { if (confirmBar) confirmBar.hidden = true; };
   cancelBtn.onclick = closeTemplatePreviewModal;
   closeBtn.onclick = closeTemplatePreviewModal;
 }

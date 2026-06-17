@@ -68,5 +68,11 @@ tmp/
 output/
 renders/
 
+# pnpm store (local cache, never commit)
+.pnpm-store/
+
+# Temporary screenshots
+step*.png
+
 # WorkBuddy workspace memory
 .workbuddy/
