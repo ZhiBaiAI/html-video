@@ -1787,7 +1787,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       const cgMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/content-graph$/);
       if (cgMatch && cgMatch[1] && m === 'GET') {
         const graph = await ctx.orchestrator.readContentGraph(cgMatch[1]);
-        if (!graph) return json(res, 404, { error: 'No content graph for this project' });
+        if (!graph) return json(res, 200, { graph: null });
         return json(res, 200, { graph });
       }
 

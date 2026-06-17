@@ -2540,10 +2540,10 @@ async function openGraphModal() {
   if (!modal || !pre) return;
   try {
     const r = await fetch(`/api/projects/${state.selected.id}/content-graph`);
-    if (!r.ok) {
+    const { graph } = await r.json();
+    if (!graph) {
       pre.textContent = '(no graph for this project)';
     } else {
-      const { graph } = await r.json();
       pre.textContent = JSON.stringify(graph, null, 2);
       state.lastGraph = graph;
     }
