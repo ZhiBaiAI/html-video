@@ -3485,6 +3485,7 @@ const AGENT_LOGOS = {
   'opencode': '/agent-icons/opencode.svg',
   'copilot': '/agent-icons/copilot.svg',
   'aider': '/agent-icons/aider.png',
+  'qoder-cli': '/agent-icons/qoder.svg',
 };
 const AGENT_ICON_FALLBACK = {
   'anthropic-api': '☁️',
@@ -3500,6 +3501,7 @@ const AGENT_DESC = {
   'cursor-agent': 'Cursor command line',
   'codex': 'Codex CLI (codex exec)',
   'hermes': 'Hermes ACP CLI',
+  'qoder-cli': 'Qoder CLI (qodercli -p)',
 };
 
 function openSettingsModal(tab = 'agent') {

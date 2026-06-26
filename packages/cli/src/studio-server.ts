@@ -1353,7 +1353,22 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         let detectedAgents: Awaited<ReturnType<typeof detectAll>> | null = null;
         if (!agentId) {
           detectedAgents = await detectAll();
-          agentId = detectedAgents.find((a) => a.available && a.id !== 'amr')?.id ?? 'anthropic-api';
+          // Prefer a real, ready-to-run CLI agent (claude/codex/...). Only fall
+          // back to anthropic-api if it's actually configured (has a key).
+          // Persist the choice so later turns don't depend on a fresh probe.
+          const ready = detectedAgents.filter((a) => a.available && a.id !== 'amr');
+          const apiReady = ready.find((a) => a.id === 'anthropic-api');
+          agentId =
+            ready.find((a) => a.id !== 'anthropic-api')?.id ??
+            apiReady?.id ??
+            'anthropic-api';
+          if (project.agentId !== agentId) {
+            try {
+              await ctx.orchestrator.setAgent(id, agentId, undefined);
+            } catch {
+              /* persist is best-effort; resolution above still holds for this turn */
+            }
+          }
         }
         const agentDef = findAgent(agentId);
         if (!agentDef) {
@@ -1735,6 +1750,30 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               }
             }
           }
+        }
+
+        // Auto-advance: the content prompt instructs the agent to append
+        // <!-- hv-phase:content-question --> when it still needs more info.
+        // Absence of that marker means it has enough — immediately run the
+        // template-pick phase in the same SSE stream so the user sees the card
+        // without having to send an extra "ok" message.
+        if (phaseInfo.phase === 'content' && !/<!--\s*hv-phase:content-question\s*-->/i.test(assistantText)) {
+          const stylePrompt = buildNeedTemplatePrompt();
+          const styleHandle = spawnAgent({
+            def: agentDef,
+            prompt: stylePrompt,
+            context: { cwd: projectDir, ...(agentModel && { model: agentModel }) },
+            onEvent: (ev) => {
+              if (ev.type === 'text') {
+                assistantText += ev.chunk;
+                textChunks += 1;
+                sseWrite(ev);
+              } else if (ev.type === 'error') {
+                process.stderr.write(`[studio:msg] proj=${id} style-autoadvance error: ${ev.message}\n`);
+              }
+            },
+          });
+          await styleHandle.done;
         }
 
         // Persist assistant message — strip the html / graph blocks when present (UI sees summary line)
@@ -3135,6 +3174,24 @@ function isMultiFrameType(pickedType: string): boolean {
   return !single;
 }
 
+function buildNeedTemplatePrompt(): string {
+  const p: string[] = [];
+  p.push(`The project has NOT selected a template yet. Do NOT generate. Tell the user — in their language, ONE short friendly line — to pick a template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
+  p.push('```hv-options');
+  p.push(JSON.stringify({
+    meta: { phase: 'need-template' },
+    question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
+    options: [
+      { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
+    ],
+    allow_freeform: false,
+  }, null, 2));
+  p.push('```');
+  p.push('');
+  p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
+  return p.join('\n');
+}
+
 function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
   const { tmpl, exampleHtml, priorHtml, history, userText, attachments, openingTopic } = args;
 
@@ -3251,49 +3308,23 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       p.push(`The user has already shared:`);
       for (const t of turns) p.push(`  - ${t.slice(0, 200)}`);
       p.push('');
-      p.push(`Either ask ONE more clarifying question, or — if you have enough — write a one-line confirmation like "好，我有思路了，下一步选模板" / "Got it. Next: pick a template." and end with the marker. The server will move on to template selection automatically when your reply is short / affirmative or when this is your second clarifying round.`);
+      p.push(`Two options:`);
+      p.push(`- If you still need more info: ask ONE clarifying question and end your reply with the marker on its own line: <!-- hv-phase:content-question -->`);
+      p.push(`- If you have enough: write ONLY a one-line confirmation in the user's language (e.g. "好，我有思路了，下一步选模板。" / "Got it. Next: pick a template."). Do NOT add the marker — the server will advance to template selection automatically.`);
     }
     p.push('');
-    p.push(`Reply in plain text + the marker. NO code blocks. Do NOT return an empty reply.`);
+    p.push(`Reply in plain text. NO code blocks. Do NOT return an empty reply.`);
     return p.join('\n');
   }
 
   // ---- style: legacy route; template selection is now the only visual choice ----
   if (phase === 'style') {
-    const p: string[] = [];
-    p.push(`Do NOT ask the user to choose an abstract visual style. Tell them — in their language, ONE short friendly line — to pick a concrete template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
-    p.push('```hv-options');
-    p.push(JSON.stringify({
-      meta: { phase: 'need-template' },
-      question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
-      options: [
-        { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
-      ],
-      allow_freeform: false,
-    }, null, 2));
-    p.push('```');
-    p.push('');
-    p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
-    return p.join('\n');
+    return buildNeedTemplatePrompt();
   }
 
   // ---- need-template: user chose "from design template" but hasn't picked one
   if (phase === 'need-template') {
-    const p: string[] = [];
-    p.push(`The project has NOT selected a template yet. Do NOT generate. Tell the user — in their language, ONE short friendly line — to pick a template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
-    p.push('```hv-options');
-    p.push(JSON.stringify({
-      meta: { phase: 'need-template' },
-      question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
-      options: [
-        { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
-      ],
-      allow_freeform: false,
-    }, null, 2));
-    p.push('```');
-    p.push('');
-    p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
-    return p.join('\n');
+    return buildNeedTemplatePrompt();
   }
 
   // ---- format / format-edit: hv-form with 3 segmented controls ----
