@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WeChat AI Dispatch · Distribution System Frame</title>
+<style>
+  /*
+   * frame-wechat-ai-dispatch
+   * A warm-white technical distribution slide inspired by WeChat ecosystem
+   * presentation screenshots. Built as original HTML/CSS keyframes for
+   * html-video export: no external assets, no copied source layout.
+   */
+  :root {
+    --paper: #f5f7f1;
+    --paper-soft: #eef2eb;
+    --ink: #202521;
+    --muted: #7c837d;
+    --line: rgba(32, 37, 33, 0.18);
+    --line-strong: #202521;
+    --green: #159c63;
+    --green-soft: rgba(21, 156, 99, 0.12);
+    --blue: #315f9f;
+    --blue-soft: rgba(49, 95, 159, 0.14);
+    --shadow: rgba(20, 32, 24, 0.08);
+    --sans: "Inter", "SF Pro Display", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    --mono: "SF Mono", "Roboto Mono", "Cascadia Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--paper); }
+  body {
+    width: 1920px;
+    height: 1080px;
+    color: var(--ink);
+    font-family: var(--sans);
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+  }
+
+  .canvas {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgba(32, 37, 33, 0.055) 1px, transparent 1px),
+      linear-gradient(0deg, rgba(32, 37, 33, 0.055) 1px, transparent 1px),
+      radial-gradient(circle at 65% 42%, rgba(49, 95, 159, 0.08), transparent 21%),
+      var(--paper);
+    background-size: 72px 72px, 72px 72px, auto, auto;
+    opacity: 0;
+    animation: paperIn 0.5s ease-out forwards, gridDrift 10s linear 0.5s infinite;
+  }
+  .canvas::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      repeating-linear-gradient(90deg, transparent 0 118px, rgba(32, 37, 33, 0.025) 118px 121px, transparent 121px 194px),
+      repeating-linear-gradient(0deg, transparent 0 148px, rgba(32, 37, 33, 0.02) 148px 151px, transparent 151px 244px);
+    mix-blend-mode: multiply;
+    opacity: 0.8;
+  }
+  .canvas::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+    transform: translateX(-120%);
+    animation: paperSweep 5.2s ease-in-out 0.8s infinite;
+    pointer-events: none;
+  }
+
+  @keyframes paperIn { to { opacity: 1; } }
+  @keyframes gridDrift { to { background-position: 72px 0, 0 72px, 0 0, 0 0; } }
+  @keyframes paperSweep {
+    0%, 54% { transform: translateX(-120%); opacity: 0; }
+    62% { opacity: 0.75; }
+    78%, 100% { transform: translateX(120%); opacity: 0; }
+  }
+
+  .stage {
+    position: absolute;
+    inset: 58px 94px 76px;
+  }
+
+  .top-rule, .bottom-rule {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--line-strong);
+    transform: scaleX(0);
+    transform-origin: left center;
+    animation: ruleDraw 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.25s forwards;
+  }
+  .top-rule { top: 0; }
+  .bottom-rule { bottom: 72px; animation-delay: 1.9s; }
+  @keyframes ruleDraw { to { transform: scaleX(1); } }
+
+  .header {
+    position: absolute;
+    top: 36px;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    opacity: 0;
+    animation: fadeUp 0.55s ease-out 0.5s forwards;
+  }
+  .brand {
+    font-size: 34px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .system {
+    font-family: var(--mono);
+    font-size: 19px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+  }
+
+  .main-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 132px;
+    bottom: 148px;
+    border: 2px solid rgba(32, 37, 33, 0.15);
+    background: rgba(247, 249, 245, 0.42);
+    opacity: 0;
+    transform: translateY(18px);
+    animation: panelIn 0.7s ease-out 0.75s forwards;
+  }
+  .main-panel::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 610px;
+    width: 2px;
+    background: rgba(32, 37, 33, 0.12);
+    transform: scaleY(0);
+    transform-origin: top;
+    animation: lineY 0.75s ease-out 1.15s forwards;
+  }
+
+  .left-copy {
+    position: absolute;
+    left: 32px;
+    top: 48px;
+    width: 520px;
+  }
+  .section-mark {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-family: var(--mono);
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: var(--green);
+    opacity: 0;
+    transform: translateY(16px);
+    animation: fadeUp 0.55s ease-out 1.18s forwards;
+  }
+  .section-mark::before {
+    content: "";
+    width: 34px;
+    height: 4px;
+    background: currentColor;
+  }
+
+  .headline {
+    margin-top: 28px;
+    font-size: 64px;
+    line-height: 1.04;
+    font-weight: 800;
+    max-width: 520px;
+  }
+  .headline .line {
+    display: block;
+    opacity: 0;
+    transform: translateY(30px);
+    animation: fadeUp 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .headline .line:nth-child(1) { animation-delay: 1.34s; }
+  .headline .line:nth-child(2) { animation-delay: 1.48s; }
+  .headline .accent { color: var(--green); }
+
+  .lede {
+    margin-top: 20px;
+    width: 488px;
+    font-size: 21px;
+    line-height: 1.42;
+    color: #4f5751;
+    opacity: 0;
+    transform: translateY(18px);
+    animation: fadeUp 0.55s ease-out 1.62s forwards;
+  }
+
+  .prompt {
+    margin-top: 24px;
+    display: inline-flex;
+    align-items: center;
+    min-width: 408px;
+    height: 72px;
+    padding: 0 30px;
+    border: 3px solid var(--ink);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.5);
+    font-size: 25px;
+    font-weight: 700;
+    box-shadow: 0 16px 40px var(--shadow);
+    opacity: 0;
+    transform: translateY(20px);
+    animation: promptIn 0.62s cubic-bezier(0.16, 1, 0.3, 1) 1.75s forwards;
+  }
+
+  .insights {
+    margin-top: 22px;
+    width: 510px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .insight {
+    display: grid;
+    grid-template-columns: 106px 1fr;
+    min-height: 54px;
+    border: 2px solid rgba(32, 37, 33, 0.18);
+    background: rgba(255, 255, 255, 0.32);
+    opacity: 0;
+    transform: translateY(16px);
+    animation: nodeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+  .insight:nth-child(1) { animation-delay: 2.02s; }
+  .insight:nth-child(2) { animation-delay: 2.14s; }
+  .insight:nth-child(3) { animation-delay: 2.26s; }
+  .insight .k {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 2px solid rgba(32, 37, 33, 0.12);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+  .insight .v {
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    font-size: 19px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+
+  .network {
+    position: absolute;
+    left: 690px;
+    right: 58px;
+    top: 74px;
+    bottom: 64px;
+  }
+  .map-title {
+    position: absolute;
+    left: 0;
+    top: 0;
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    opacity: 0;
+    transform: translateY(14px);
+    animation: fadeUp 0.52s ease-out 1.2s forwards;
+  }
+  .legend {
+    position: absolute;
+    top: -3px;
+    right: 0;
+    display: flex;
+    gap: 18px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transform: translateY(14px);
+    animation: fadeUp 0.52s ease-out 1.28s forwards;
+  }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .legend i {
+    width: 24px;
+    height: 3px;
+    display: inline-block;
+    background: var(--line);
+  }
+  .legend .green i { height: 5px; background: var(--green); }
+  .legend .blue i { width: 14px; height: 14px; border-radius: 50%; background: var(--blue); }
+
+  .hub {
+    position: absolute;
+    left: 46%;
+    top: 47%;
+    width: 226px;
+    height: 226px;
+    border-radius: 50%;
+    border: 5px solid var(--blue);
+    background: radial-gradient(circle, #edf6ff 0%, #edf6ff 54%, #e7f2ff 55%, #f2f6f1 100%);
+    display: grid;
+    place-items: center;
+    transform: translate(-50%, -50%) scale(0.82);
+    opacity: 0;
+    box-shadow: 0 0 0 18px var(--blue-soft), 0 18px 50px rgba(49, 95, 159, 0.16);
+    animation: hubIn 0.72s cubic-bezier(0.16, 1, 0.3, 1) 1.3s forwards, hubPulse 2.6s ease-in-out 2.2s infinite;
+    z-index: 3;
+  }
+  .hub small {
+    display: block;
+    text-align: center;
+    font-size: 22px;
+    color: var(--blue);
+    margin-bottom: 10px;
+  }
+  .hub b {
+    display: block;
+    text-align: center;
+    font-size: 66px;
+    line-height: 1;
+    color: var(--blue);
+    font-weight: 800;
+  }
+
+  @keyframes hubIn {
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+  @keyframes hubPulse {
+    0%, 100% { box-shadow: 0 0 0 15px rgba(49, 95, 159, 0.11), 0 18px 50px rgba(49, 95, 159, 0.16); }
+    50% { box-shadow: 0 0 0 28px rgba(49, 95, 159, 0.05), 0 18px 50px rgba(49, 95, 159, 0.18); }
+  }
+
+  .node {
+    position: absolute;
+    width: 205px;
+    height: 128px;
+    padding: 24px 28px;
+    border: 3px solid rgba(32, 37, 33, 0.22);
+    background: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 10px 24px var(--shadow);
+    opacity: 0;
+    transform: translateY(24px);
+    animation: nodeIn 0.58s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    z-index: 4;
+  }
+  .node .label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 17px;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .node .name {
+    display: block;
+    font-size: 38px;
+    line-height: 1;
+    font-weight: 800;
+  }
+  .node-1 { left: 74px; top: 46px; animation-delay: 1.65s; }
+  .node-2 { right: 74px; top: 38px; animation-delay: 1.78s; }
+  .node-3 { left: 110px; bottom: 112px; animation-delay: 1.92s; }
+  .node-4 { right: 126px; bottom: 104px; animation-delay: 2.06s; }
+  .node-match {
+    right: 26px;
+    top: 280px;
+    border-color: var(--green);
+    background: var(--green-soft);
+    box-shadow: 0 0 0 8px rgba(21, 156, 99, 0.04), 0 10px 28px rgba(21, 156, 99, 0.14);
+    animation-delay: 2.22s;
+  }
+
+  @keyframes nodeIn { to { opacity: 1; transform: translateY(0); } }
+
+  .badge {
+    position: absolute;
+    right: 28px;
+    top: 432px;
+    height: 54px;
+    padding: 0 28px;
+    display: flex;
+    align-items: center;
+    background: var(--green);
+    color: white;
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    opacity: 0;
+    transform: translateY(14px);
+    animation: badgeIn 0.46s ease-out 2.58s forwards;
+  }
+  @keyframes badgeIn { to { opacity: 1; transform: translateY(0); } }
+
+  .connector {
+    position: absolute;
+    height: 2px;
+    background: var(--line);
+    transform-origin: left center;
+    transform: scaleX(0) rotate(var(--rot));
+    animation: connectDraw 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    z-index: 1;
+  }
+  .c1 { left: 270px; top: 180px; width: 275px; --rot: 34deg; animation-delay: 1.7s; }
+  .c2 { left: 585px; top: 178px; width: 298px; --rot: -35deg; animation-delay: 1.84s; }
+  .c3 { left: 280px; top: 450px; width: 270px; --rot: -38deg; animation-delay: 1.98s; }
+  .c4 { left: 588px; top: 456px; width: 260px; --rot: 37deg; animation-delay: 2.12s; }
+  .c5 {
+    left: 603px;
+    top: 336px;
+    width: 315px;
+    --rot: 3deg;
+    height: 5px;
+    background: var(--green);
+    animation-delay: 2.38s;
+  }
+  @keyframes connectDraw {
+    to { transform: scaleX(1) rotate(var(--rot)); }
+  }
+
+  .metric-strip {
+    position: absolute;
+    left: 0;
+    right: 338px;
+    bottom: 0;
+    height: 76px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 2px solid rgba(32, 37, 33, 0.16);
+    border-bottom: 2px solid rgba(32, 37, 33, 0.16);
+    opacity: 0;
+    transform: translateY(18px);
+    animation: fadeUp 0.58s ease-out 2.72s forwards;
+  }
+  .metric {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 22px;
+    border-right: 2px solid rgba(32, 37, 33, 0.12);
+  }
+  .metric:last-child { border-right: 0; }
+  .metric b {
+    color: var(--green);
+    font-family: var(--mono);
+    font-size: 28px;
+    line-height: 1;
+  }
+  .metric span {
+    color: var(--muted);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .panel-note {
+    position: absolute;
+    left: 32px;
+    bottom: 18px;
+    display: flex;
+    gap: 28px;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 14px;
+    letter-spacing: 0.06em;
+    opacity: 0;
+    transform: translateY(12px);
+    animation: fadeUp 0.52s ease-out 2.78s forwards;
+  }
+
+  .bottom {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 72px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 38px;
+    font-size: 56px;
+    line-height: 1;
+    font-weight: 800;
+    color: var(--muted);
+    opacity: 0;
+    animation: fadeUp 0.65s ease-out 2.35s forwards;
+  }
+  .bottom .arrow {
+    color: var(--ink);
+    font-weight: 500;
+    transform: translateX(-16px);
+    opacity: 0;
+    animation: arrowMove 1.25s ease-out 2.62s forwards;
+  }
+  .bottom .accent { color: var(--green); }
+
+  @keyframes fadeUp {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes panelIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes lineY { to { transform: scaleY(1); } }
+  @keyframes promptIn {
+    0% { opacity: 0; transform: translateY(20px) scale(0.98); }
+    70% { opacity: 1; transform: translateY(0) scale(1.02); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes arrowMove {
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; }
+    .canvas, .header, .main-panel, .section-mark, .headline .line, .prompt,
+    .lede, .insight, .map-title, .legend, .metric-strip, .panel-note,
+    .hub, .node, .badge, .bottom, .bottom .arrow { opacity: 1; transform: none; }
+    .hub { transform: translate(-50%, -50%) scale(1); }
+    .top-rule, .bottom-rule, .main-panel::before { transform: scale(1); }
+    .connector { transform: scaleX(1) rotate(var(--rot)); }
+  }
+</style>
+</head>
+<body>
+  <div class="canvas"></div>
+  <main class="stage">
+    <div class="top-rule"></div>
+    <div class="bottom-rule"></div>
+
+    <header class="header">
+      <div class="brand">微信 AI 生态 / 小程序分发重构</div>
+      <div class="system">DISTRIBUTION SYSTEM · 2026</div>
+    </header>
+
+    <section class="main-panel">
+      <div class="left-copy">
+        <div class="section-mark">02 / AI DISPATCH</div>
+        <h1 class="headline">
+          <span class="line">未来，AI</span>
+          <span class="line accent">主动调度服务</span>
+        </h1>
+        <p class="lede">用户不再逐个搜索小程序，系统理解意图后，自动筛选服务、补齐上下文，并把最佳结果推到前台。</p>
+        <div class="prompt">“帮我完成一件事”</div>
+        <div class="insights">
+          <div class="insight"><span class="k">INTENT</span><span class="v">自然语言表达任务目标</span></div>
+          <div class="insight"><span class="k">CONTEXT</span><span class="v">位置、时间、偏好自动参与匹配</span></div>
+          <div class="insight"><span class="k">ACTION</span><span class="v">命中服务后直接进入履约路径</span></div>
+        </div>
+      </div>
+
+      <div class="network">
+        <div class="map-title">SERVICE ROUTER / MATCH SCORE</div>
+        <div class="legend">
+          <span><i></i>IDLE</span>
+          <span class="green"><i></i>MATCHED</span>
+          <span class="blue"><i></i>AI HUB</span>
+        </div>
+
+        <span class="connector c1"></span>
+        <span class="connector c2"></span>
+        <span class="connector c3"></span>
+        <span class="connector c4"></span>
+        <span class="connector c5"></span>
+
+        <div class="hub"><div><small>微信</small><b>AI</b></div></div>
+
+        <div class="node node-1"><span class="label">SERVICE 01</span><span class="name">出行</span></div>
+        <div class="node node-2"><span class="label">SERVICE 02</span><span class="name">酒店</span></div>
+        <div class="node node-3"><span class="label">SERVICE 05</span><span class="name">医疗</span></div>
+        <div class="node node-4"><span class="label">SERVICE 04</span><span class="name">物流</span></div>
+        <div class="node node-match"><span class="label">MATCHED</span><span class="name">餐饮</span></div>
+        <div class="badge">AI SELECTED</div>
+        <div class="metric-strip">
+          <div class="metric"><b>01</b><span>Intent parsed</span></div>
+          <div class="metric"><b>05</b><span>Services ranked</span></div>
+          <div class="metric"><b>1st</b><span>Best path selected</span></div>
+        </div>
+      </div>
+      <div class="panel-note">
+        <span>SOURCE: PRODUCT STRATEGY DRAFT</span>
+        <span>PAGE 02 / 06</span>
+        <span>STATUS: CONCEPT MODEL</span>
+      </div>
+    </section>
+
+    <footer class="bottom">
+      <span>搜索分发</span>
+      <span class="arrow">→</span>
+      <span>AI <span class="accent">调度</span></span>
+    </footer>
+  </main>
+</body>
+</html>

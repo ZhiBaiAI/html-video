@@ -920,7 +920,7 @@ function renderMain() {
                   </select>
                 </label>
                 <div class="talking-actions">
-                  <input type="file" id="talking-file" accept="video/*" style="display:none" />
+                  <input type="file" id="talking-file" accept="video/*,image/*" style="display:none" />
                   <button class="st-generate" id="btn-talking-upload">${t('talking.upload')}</button>
                   <button class="st-draft" id="btn-talking-transcribe">${t('talking.transcribe')}</button>
                   <button class="st-clear" id="btn-talking-clear">${t('talking.clear')}</button>
@@ -1080,23 +1080,32 @@ function wireTalkingHeadPanel() {
   const render = () => {
     const th = state.selected?.talkingHead;
     const assets = state.selected?.assets || [];
-    const video = th?.videoAssetId ? assets.find((a) => a.id === th.videoAssetId) : null;
+    const media = th?.videoAssetId ? assets.find((a) => a.id === th.videoAssetId) : null;
+    const isVideo = media?.type === 'video';
+    const isImage = media?.type === 'image';
     const transcript = th?.transcriptAssetId ? assets.find((a) => a.id === th.transcriptAssetId) : null;
-    transcribeBtn.disabled = !video || state.transcribingTalkingHead;
+    transcribeBtn.disabled = !isVideo || state.transcribingTalkingHead;
     clearBtn.disabled = !th;
     if (audioModeSelect) {
       audioModeSelect.disabled = !th;
-      audioModeSelect.value = normalizeAudioMode(th?.audioMode);
+      const originalOption = audioModeSelect.querySelector('option[value="original"]');
+      if (originalOption) originalOption.disabled = !isVideo;
+      audioModeSelect.value = isVideo ? normalizeAudioMode(th?.audioMode) : 'synthetic';
     }
     if (previewEl) {
-      const videoSrc = video?.path ? `/asset?path=${encodeURIComponent(video.path)}` : '';
-      previewEl.innerHTML = video
+      const mediaSrc = media?.path ? `/asset?path=${encodeURIComponent(media.path)}` : '';
+      const preview = isVideo
+        ? `<video controls src="${mediaSrc}"></video>`
+        : isImage
+          ? `<img src="${mediaSrc}" alt="" />`
+          : '';
+      previewEl.innerHTML = media
         ? `<div class="talking-source">
-            <video controls src="${videoSrc}"></video>
+            ${preview}
             <div class="talking-meta">
-              <b>${esc(video.metadata?.filename || 'talking-head video')}</b>
-              <span>${transcript ? t('talking.transcript_ready') : t('talking.transcript_missing')}</span>
-              <span>${normalizeAudioMode(th?.audioMode) === 'original' ? t('talking.audio_original') : t('talking.audio_synthetic')}</span>
+              <b>${esc(media.metadata?.filename || t('talking.source_fallback'))}</b>
+              <span>${isVideo ? (transcript ? t('talking.transcript_ready') : t('talking.transcript_missing')) : t('talking.image_overlay_only')}</span>
+              <span>${isVideo && normalizeAudioMode(th?.audioMode) === 'original' ? t('talking.audio_original') : t('talking.audio_synthetic')}</span>
             </div>
           </div>`
         : `<div class="soundtrack-hint">${t('talking.empty')}</div>`;
@@ -1130,7 +1139,9 @@ function wireTalkingHeadPanel() {
   }
 
   transcribeBtn.onclick = async () => {
-    if (!state.selected?.talkingHead?.videoAssetId) return;
+    const th = state.selected?.talkingHead;
+    const media = th?.videoAssetId ? (state.selected?.assets || []).find((a) => a.id === th.videoAssetId) : null;
+    if (!media || media.type !== 'video') return;
     state.transcribingTalkingHead = true;
     transcribeBtn.disabled = true;
     if (statusEl) statusEl.textContent = t('talking.transcribing');
@@ -1615,6 +1626,19 @@ function renderChatLog() {
   const log = document.getElementById('chat-log');
   if (!log) return;
   if (!state.messages.length) {
+    const availableAgents = state.agents.filter(a => a.available);
+    if (state.agents.length > 0 && availableAgents.length === 0) {
+      log.innerHTML = `<div class="chat-empty"><div><div class="ico">⚙️</div>
+        <div style="font-weight:500;margin-bottom:6px;">${t('chat.no_agent.title')}</div>
+        ${t('chat.no_agent.body')}
+        <div style="margin-top:12px;">
+          <button class="empty-action" id="chat-open-agent-settings">${t('chat.no_agent.action')}</button>
+        </div>
+      </div></div>`;
+      const btn = document.getElementById('chat-open-agent-settings');
+      if (btn) btn.onclick = () => openSettingsModal('agent');
+      return;
+    }
     log.innerHTML = `<div class="chat-empty"><div><div class="ico">💬</div>
       <div style="font-weight:500;margin-bottom:6px;">${t('chat.empty.title')}</div>
       ${t('chat.empty.body')}
@@ -2885,6 +2909,34 @@ async function sendMessage() {
             }
             state.messages[assistantIdx].content += '\n\n⚠️ ' + ev.message;
             renderChatLog();
+          } else if (ev.type === 'source_status') {
+            const status = ev.status || 'ok';
+            const label = ev.title || ev.url || 'source';
+            const msg = status === 'failed'
+              ? t('source.fetch_failed', { url: ev.url || label, message: ev.message || '' })
+              : ev.truncated
+                ? t('source.fetch_ok_truncated', { title: label })
+                : t('source.fetch_ok', { title: label });
+            state.messages.push({
+              role: status === 'failed' ? 'system' : 'preview-event',
+              content: msg,
+              ts: Date.now(),
+            });
+            renderChatLog();
+          } else if (ev.type === 'template_auto_selected') {
+            const label = ev.template_name || ev.template_id || 'template';
+            state.messages.push({
+              role: 'preview-event',
+              content: t('chat.template_auto_selected', { name: label }),
+              ts: Date.now(),
+            });
+            try {
+              const pr = await API.getProject(state.selected.id);
+              state.selected = pr.project;
+              renderToolbar();
+              renderFooter();
+            } catch { /* best-effort UI sync; generation continues */ }
+            renderChatLog();
           } else if (ev.type === 'error') {
             if (assistantIdx === -1) {
               state.messages[thinkingIdx] = { role: 'system', content: '⚠️ ' + ev.message, ts: Date.now() };
@@ -3101,6 +3153,8 @@ async function runNarrate() {
         } else if (ev.type === 'narrate_script') {
           // topic-mode: surface the agent-written script so the user sees it.
           narrateLog(`<b>${esc(t('narrate.tab_script'))}</b>: ${esc(ev.script.slice(0, 120))}${ev.script.length > 120 ? '…' : ''}`);
+        } else if (ev.type === 'template_auto_selected') {
+          narrateLog(esc(t('narrate.template_auto_selected', { name: ev.template_name || ev.template_id || 'template' })));
         } else if (ev.type === 'narrate_graph') {
           narrateLog(`✓ ${ev.frame_count} frames`);
         } else if (ev.type === 'narrate_frame_done') {
@@ -3160,14 +3214,14 @@ function openGallery() {
     const tags = (t.tags || []).slice(0, 4).map((tg) => `<span class="tag">${esc(tg)}</span>`).join('');
     const portrait = isPortraitTemplate(t);
     const entry = templateEntryPath(t);
-    // Poster-mode templates (entry only stitches sub-comps via
-    // data-composition-src) iframe-render blank until the HF player ships —
-    // show the shipped poster instead. Falls back to the iframe when the
-    // backend couldn't find a poster file (poster_url null).
+    // Gallery cards stay lightweight: use static posters when available and
+    // reserve live iframes for the fullscreen preview. Loading dozens of
+    // animated iframes at once creates noisy 404/resource warnings and makes
+    // template browsing feel sluggish.
     const inner =
-      t.preview_mode === 'poster' && t.poster_url
+      t.poster_url
         ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(templateDisplayName(t) || t.id)}" loading="lazy" />`
-        : `<iframe sandbox="allow-scripts allow-same-origin" src="/template-asset/${esc(t.id)}/${esc(entry)}" loading="lazy"></iframe>`;
+        : `<div class="poster-fallback"><span>${esc(t.category || t.engine || 'template')}</span><b>${esc(templateDisplayName(t) || t.id)}</b></div>`;
     return `<div class="gallery-card${sel}" data-id="${t.id}">
       <div class="preview ${portrait ? 'portrait' : ''}" data-portrait="${portrait}">
         ${inner}
@@ -3298,6 +3352,7 @@ function openTemplatePreviewModal(tpl) {
   const confirmBar = document.getElementById('tpl-preview-confirm-bar');
   const confirmMsg = document.getElementById('tpl-preview-confirm-msg');
   const confirmYes = document.getElementById('tpl-preview-confirm-yes');
+  const confirmRestyle = document.getElementById('tpl-preview-confirm-restyle');
   const confirmNo = document.getElementById('tpl-preview-confirm-no');
 
   // Hide the confirm bar when opening the modal.
@@ -3313,7 +3368,9 @@ function openTemplatePreviewModal(tpl) {
 
   // Core apply logic — called from useBtn (no existing template) or from
   // the inline confirm bar (replacing an existing template).
-  const doApply = async () => {
+  const canRestyleAfterApply = () => (state.selected?.frames?.length ?? 0) > 1
+    && state.agents.some((agent) => agent.available);
+  const doApply = async ({ restyleAfter = false } = {}) => {
     if (!state.selected) return;
     if (confirmBar) confirmBar.hidden = true;
     useBtn.disabled = true;
@@ -3323,6 +3380,13 @@ function openTemplatePreviewModal(tpl) {
       closeGallery();
       await selectProject(state.selected.id);
       toast(t('tpl_preview.applied', { name: templateDisplayName(tpl) || tpl.id }), 'success');
+      if (restyleAfter && canRestyleAfterApply()) {
+        const ta = document.getElementById('composer-input');
+        if (ta) {
+          ta.value = t('tpl_preview.restyle_prompt', { name: templateDisplayName(tpl) || tpl.id });
+          await sendMessage();
+        }
+      }
     } catch (e) {
       closeTemplatePreviewModal();
       closeGallery();
@@ -3340,11 +3404,13 @@ function openTemplatePreviewModal(tpl) {
       // Show the inline confirm bar instead of blocking confirm().
       if (confirmMsg) confirmMsg.textContent = t('tpl_preview.replace_confirm', { name: templateDisplayName(tpl) || tpl.id });
       if (confirmBar) confirmBar.hidden = false;
+      if (confirmRestyle) confirmRestyle.hidden = !canRestyleAfterApply();
       return;
     }
     doApply();
   };
   if (confirmYes) confirmYes.onclick = doApply;
+  if (confirmRestyle) confirmRestyle.onclick = () => doApply({ restyleAfter: true });
   if (confirmNo) confirmNo.onclick = () => { if (confirmBar) confirmBar.hidden = true; };
   cancelBtn.onclick = closeTemplatePreviewModal;
   closeBtn.onclick = closeTemplatePreviewModal;

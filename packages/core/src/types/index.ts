@@ -432,6 +432,7 @@ export type ProjectTalkingHeadAudioMode =
 
 export interface ProjectTalkingHead {
   enabled: boolean;
+  /** Legacy field name; may point to a video asset or an image/GIF asset. */
   videoAssetId: string;
   transcriptAssetId?: string;
   srtAssetId?: string;
