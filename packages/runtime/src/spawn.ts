@@ -114,9 +114,22 @@ export function spawnAgent(opts: SpawnOptions): SpawnHandle {
       ...(isWin && { shell: true }),
       windowsHide: true,
     });
+    let killRequested = false;
     childKill = () => {
+      if (killRequested) return;
+      killRequested = true;
       try {
-        child.kill('SIGTERM');
+        if (isWin && child.pid) {
+          // Killing cmd.exe alone can leave the actual .cmd/.exe agent alive.
+          // Terminate the full process tree so Studio timeouts and user aborts
+          // reliably release the GENERATING lock on Windows.
+          cpSpawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+            stdio: 'ignore',
+            windowsHide: true,
+          }).unref();
+        } else {
+          child.kill('SIGTERM');
+        }
       } catch {
         // ignore
       }
@@ -167,9 +180,16 @@ export function spawnAgent(opts: SpawnOptions): SpawnHandle {
         }
         stderrBuf += errDecoder.end();
         if (code !== 0) {
+          const stderr = stderrBuf.trim();
+          // CLI startup warnings can be several KB long. Keeping only the
+          // beginning hid the actionable API/model error at the end and made
+          // Studio misreport the failure as an empty agent reply.
+          const stderrSummary = stderr.length <= 1800
+            ? stderr
+            : `${stderr.slice(0, 500)}\n… ${stderr.length - 1700} bytes omitted …\n${stderr.slice(-1200)}`;
           onEvent?.({
             type: 'error',
-            message: `agent exit code ${code}${stderrBuf ? `: ${stderrBuf.slice(0, 500)}` : ''}`,
+            message: `agent exit code ${code}${stderrSummary ? `: ${stderrSummary}` : ''}`,
           });
         }
         onEvent?.({ type: 'message_end', reason: code === 0 ? 'ok' : 'error' });
@@ -189,4 +209,3 @@ export function spawnAgent(opts: SpawnOptions): SpawnHandle {
     done,
   };
 }
-

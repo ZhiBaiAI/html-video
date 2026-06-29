@@ -55,3 +55,14 @@ test('Trae CLI public surface does not expose internal COCO details', async () =
     );
   }
 });
+
+test('Codex CLI receives the Studio model override', () => {
+  const codex = findAgent('codex');
+  assert.ok(codex);
+  assert.deepEqual(codex.buildArgs('', { cwd: '/tmp/html-video-project', model: 'gpt-5.4' }), [
+    'exec',
+    '--skip-git-repo-check',
+    '--model',
+    'gpt-5.4',
+  ]);
+});

@@ -71,6 +71,23 @@ function templateDescription(tpl) {
   return tpl.description_zh || TEMPLATE_ZH[tpl.id]?.desc || tpl.description || '';
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const API = {
   projects: () => fetch('/api/projects').then(r => r.json()),
   createProject: b => fetch('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json()),
@@ -79,7 +96,7 @@ const API = {
   deleteProject: id => fetch(`/api/projects/${id}`, { method: 'DELETE' }).then(r => r.json()),
   templates: () => fetch('/api/templates').then(r => r.json()),
   agents: () => fetch('/api/agents').then(r => r.json()),
-  setTemplate: (id, tid) => fetch(`/api/projects/${id}/template`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template_id: tid }) }).then(r => r.json()),
+  setTemplate: (id, tid) => fetchWithTimeout(`/api/projects/${id}/template`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template_id: tid }) }).then(readApiResult),
   setAgent: (id, aid, model) => fetch(`/api/projects/${id}/agent`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent_id: aid, ...(model !== undefined && { agent_model: model }) }) }).then(r => r.json()),
   exportMp4: id => fetch(`/api/projects/${id}/export`, { method: 'POST' }).then(r => r.json()),
   getMessages: id => fetch(`/api/projects/${id}/messages`).then(r => r.json()),
@@ -1844,7 +1861,7 @@ function renderMessage(m, idx) {
   if (m.role === 'thinking') return `<div class="msg thinking">${esc(m.content || t('chat.thinking'))}</div>`;
   if (m.role === 'export-done') {
     const path = m.content || '';
-    const fname = path.split('/').pop() || 'output.mp4';
+    const fname = path.split(/[\\/]/).pop() || 'output.mp4';
     return `<div class="msg export-done">
       <div class="export-title">${t('export.title')}</div>
       <div class="export-path"><code>${esc(path)}</code></div>
@@ -2434,14 +2451,16 @@ function attachPreviewScaler() {
   if (!frame) return;
   const apply = () => {
     const w = frame.clientWidth;
-    if (!w) return;
+    const h = frame.clientHeight;
+    if (!w || !h) return;
     // Scale by the inner element's native design width (not a hardcoded 1920)
     // so non-16:9 aspects (1080-wide) shrink correctly too. A native (enhanced)
     // frame uses a <video> instead of an <iframe> — scale it the same way, else
     // the 1920×1080 MP4 overflows and the frame gets cropped.
     const inner = frame.querySelector('iframe, video');
     const nativeW = inner ? (parseFloat(inner.style.width) || 1920) : 1920;
-    frame.style.setProperty('--preview-scale', (w / nativeW).toFixed(4));
+    const nativeH = inner ? (parseFloat(inner.style.height) || 1080) : 1080;
+    frame.style.setProperty('--preview-scale', Math.min(w / nativeW, h / nativeH).toFixed(4));
   };
   apply();
   if (_previewResizeObserver) _previewResizeObserver.disconnect();
@@ -2473,12 +2492,18 @@ function renderFramesStrip() {
     return;
   }
   strip.classList.add('has-frames');
-  // Each chip = label + mini iframe of the frame's actual HTML, transform-
-  // scaled so the 1920×1080 page fits in a ~180×100 thumb. sandbox blocks
-  // navigation; allow-scripts so any opening animation runs.
+  // Each chip = label + mini iframe of the frame's actual HTML, scaled from the
+  // project's real native resolution into a 178×100 bounding box. This keeps
+  // portrait / square / 4:5 thumbnails honest instead of forcing 16:9.
   // Bust cache when frame content changes (re-renders point to a new
   // versioned URL via `?v=<timestamp>` derived from project.updatedAt).
   const ver = p.updatedAt ? new Date(p.updatedAt).getTime() : Date.now();
+  const res = p.preferences?.resolution ?? { width: 1920, height: 1080 };
+  const nativeW = Number(res.width) || 1920;
+  const nativeH = Number(res.height) || 1080;
+  const thumbScale = Math.min(178 / nativeW, 100 / nativeH);
+  const thumbW = Math.max(1, Math.round(nativeW * thumbScale));
+  const thumbH = Math.max(1, Math.round(nativeH * thumbScale));
   const tabs = frames.map((f) => {
     const isActive = f.graphNodeId === state.activeFrameId;
     const isFocus = f.graphNodeId === state.iterateFocusFrameId;
@@ -2503,8 +2528,8 @@ function renderFramesStrip() {
         enhanceCtl = `<span class="frame-enhance" data-fid="${esc(f.graphNodeId)}" data-act="enhance" title="${esc(t('frames.enhance_hint'))}">${t('frames.enhance')}</span>`;
       }
     }
-    return `<button class="${cls}${isData ? ' is-data' : ''}" data-fid="${esc(f.graphNodeId)}">
-      <div class="frame-thumb">
+    return `<button class="${cls}${isData ? ' is-data' : ''}" data-fid="${esc(f.graphNodeId)}" style="width:${thumbW + 2}px">
+      <div class="frame-thumb" style="width:${thumbW}px;height:${thumbH}px;--thumb-native-width:${nativeW}px;--thumb-native-height:${nativeH}px;--thumb-scale:${thumbScale}">
         ${thumbInner}
         ${enhanceCtl}
         ${isFocus ? '<div class="focus-mark" title="正在编辑此帧">✎</div>' : ''}
@@ -2987,21 +3012,6 @@ function openNarrateModal() {
     }
   }
 
-  // Populate the template <select> with all available templates.
-  // Pre-select the project's current template so the user can keep it or switch.
-  const tplSel = document.getElementById('narrate-template');
-  if (tplSel) {
-    const currentTplId = state.selected?.templateId;
-    const noneOpt = `<option value="">${esc(t('narrate.template_none'))}</option>`;
-    const tplOpts = (state.templates || []).map((tpl) => {
-      const name = templateDisplayName(tpl) || tpl.id;
-      const selected = tpl.id === currentTplId ? ' selected' : '';
-      return `<option value="${esc(tpl.id)}"${selected}>${esc(name)}</option>`;
-    }).join('');
-    tplSel.innerHTML = noneOpt + tplOpts;
-    if (!currentTplId) tplSel.value = '';
-  }
-
   // Pre-select aspect based on the project's current resolution.
   const aspectSel = document.getElementById('narrate-aspect');
   if (aspectSel && state.selected) {
@@ -3014,6 +3024,29 @@ function openNarrateModal() {
       else aspectSel.value = '16:9';
     }
   }
+
+  // Only offer templates that support the selected output aspect. Forcing a
+  // 16:9-only structure into 9:16 / 4:5 creates a small landscape composition
+  // inside a larger portrait canvas, which is the exact "shrunk frame" failure.
+  const tplSel = document.getElementById('narrate-template');
+  const templateSupportsNarrateAspect = (tpl, aspect) => {
+    const aspects = tpl?.output?.resolution?.supported_aspects;
+    return !Array.isArray(aspects) || aspects.length === 0 || aspects.includes(aspect);
+  };
+  const refreshNarrateTemplates = () => {
+    if (!tplSel) return;
+    const aspect = aspectSel?.value || '16:9';
+    const prior = tplSel.value || state.selected?.templateId || '';
+    const compatible = (state.templates || []).filter((tpl) => templateSupportsNarrateAspect(tpl, aspect));
+    const noneOpt = `<option value="">${esc(t('narrate.template_none'))}</option>`;
+    tplSel.innerHTML = noneOpt + compatible.map((tpl) => {
+      const name = templateDisplayName(tpl) || tpl.id;
+      return `<option value="${esc(tpl.id)}">${esc(name)}</option>`;
+    }).join('');
+    tplSel.value = compatible.some((tpl) => tpl.id === prior) ? prior : '';
+  };
+  refreshNarrateTemplates();
+  if (aspectSel) aspectSel.onchange = refreshNarrateTemplates;
 
   // Reset to the script tab + cleared inputs each open.
   setNarrateTab('script');
@@ -3101,6 +3134,7 @@ async function runNarrate() {
   const payload = {
     mode: isTopic ? 'topic' : 'script',
     agentId,
+    ...(state.selected.agentModel && { agentModel: state.selected.agentModel }),
     aspect,
     ...(voiceId && { voiceId }),
     ...(templateId && { templateId }),
@@ -3150,6 +3184,8 @@ async function runNarrate() {
         try { ev = JSON.parse(line.slice(6)); } catch { continue; }
         if (ev.type === 'narrate_progress') {
           narrateLog(esc(t(ev.message_key ?? ev.message ?? '')));
+        } else if (ev.type === 'narrate_design_progress') {
+          narrateLog(esc(ev.message ?? ''));
         } else if (ev.type === 'narrate_script') {
           // topic-mode: surface the agent-written script so the user sees it.
           narrateLog(`<b>${esc(t('narrate.tab_script'))}</b>: ${esc(ev.script.slice(0, 120))}${ev.script.length > 120 ? '…' : ''}`);
@@ -3370,30 +3406,46 @@ function openTemplatePreviewModal(tpl) {
   // the inline confirm bar (replacing an existing template).
   const canRestyleAfterApply = () => (state.selected?.frames?.length ?? 0) > 1
     && state.agents.some((agent) => agent.available);
+  let applying = false;
   const doApply = async ({ restyleAfter = false } = {}) => {
-    if (!state.selected) return;
+    if (!state.selected || applying) return;
+    const projectId = state.selected.id;
+    const shouldRestyle = restyleAfter && canRestyleAfterApply();
+    applying = true;
     if (confirmBar) confirmBar.hidden = true;
     useBtn.disabled = true;
+    if (confirmYes) confirmYes.disabled = true;
+    if (confirmRestyle) confirmRestyle.disabled = true;
+    if (confirmNo) confirmNo.disabled = true;
+    const priorLabel = useBtn.textContent;
+    useBtn.textContent = '…';
     try {
-      await API.setTemplate(state.selected.id, tpl.id);
+      const result = await API.setTemplate(projectId, tpl.id);
+      if (!result.ok) throw new Error(result.data?.error || `HTTP ${result.status}`);
       closeTemplatePreviewModal();
       closeGallery();
-      await selectProject(state.selected.id);
+      await selectProject(projectId);
       toast(t('tpl_preview.applied', { name: templateDisplayName(tpl) || tpl.id }), 'success');
-      if (restyleAfter && canRestyleAfterApply()) {
+      if (shouldRestyle) {
         const ta = document.getElementById('composer-input');
         if (ta) {
           ta.value = t('tpl_preview.restyle_prompt', { name: templateDisplayName(tpl) || tpl.id });
-          await sendMessage();
+          // Do not keep the template-click handler pending for the entire agent
+          // generation. sendMessage owns its own error/UI lifecycle and streams
+          // progress; detaching here prevents a slow Windows CLI from making the
+          // modal interaction look frozen.
+          void sendMessage();
         }
       }
     } catch (e) {
-      closeTemplatePreviewModal();
-      closeGallery();
-      if (state.selected) { renderMain(); renderToolbar(); }
       toast(`⚠️ ${e?.message ?? e}`, 'error');
     } finally {
+      applying = false;
       useBtn.disabled = false;
+      useBtn.textContent = priorLabel;
+      if (confirmYes) confirmYes.disabled = false;
+      if (confirmRestyle) confirmRestyle.disabled = false;
+      if (confirmNo) confirmNo.disabled = false;
     }
   };
 
@@ -3407,10 +3459,10 @@ function openTemplatePreviewModal(tpl) {
       if (confirmRestyle) confirmRestyle.hidden = !canRestyleAfterApply();
       return;
     }
-    doApply();
+    void doApply();
   };
-  if (confirmYes) confirmYes.onclick = doApply;
-  if (confirmRestyle) confirmRestyle.onclick = () => doApply({ restyleAfter: true });
+  if (confirmYes) confirmYes.onclick = () => void doApply();
+  if (confirmRestyle) confirmRestyle.onclick = () => void doApply({ restyleAfter: true });
   if (confirmNo) confirmNo.onclick = () => { if (confirmBar) confirmBar.hidden = true; };
   cancelBtn.onclick = closeTemplatePreviewModal;
   closeBtn.onclick = closeTemplatePreviewModal;

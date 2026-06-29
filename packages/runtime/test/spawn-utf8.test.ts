@@ -45,3 +45,20 @@ test('CJK split across stdout chunks is not corrupted', async () => {
   assert.equal(collected, '设计引擎：每次使用都是一次进化。');
   assert.ok(!collected.includes('�'), 'must contain no U+FFFD replacement chars');
 });
+
+test('non-zero exits retain the actionable tail of long stderr', async () => {
+  const code = `process.stderr.write('warning\\n'.repeat(300) + 'FINAL MODEL ERROR'); process.exit(1);`;
+  let error = '';
+  const handle = spawnAgent({
+    def: makeNodeDef(code),
+    prompt: '',
+    context: { cwd: process.cwd() },
+    onEvent: (ev) => {
+      if (ev.type === 'error') error = ev.message;
+    },
+  });
+  const { exitCode } = await handle.done;
+  assert.equal(exitCode, 1);
+  assert.match(error, /FINAL MODEL ERROR/);
+  assert.match(error, /bytes omitted/);
+});

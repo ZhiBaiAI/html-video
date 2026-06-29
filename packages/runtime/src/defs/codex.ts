@@ -16,8 +16,12 @@ export const codex: AgentDef = {
   name: 'Codex CLI',
   bin: 'codex',
   versionArgs: ['--version'],
-  buildArgs(_prompt, _ctx) {
-    return ['exec', '--skip-git-repo-check'];
+  buildArgs(_prompt, ctx) {
+    return [
+      'exec',
+      '--skip-git-repo-check',
+      ...(ctx.model ? ['--model', ctx.model] : []),
+    ];
   },
   streamFormat: 'plain',
   promptViaStdin: true,

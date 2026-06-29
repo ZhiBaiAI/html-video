@@ -750,13 +750,13 @@
     background: var(--accent); color: var(--accent-fg); border-radius: 50%;
     font-size: 12px; font-weight: 700; box-shadow: 0 2px 6px rgba(0,0,0,.3);
     z-index: 2; }
-  /* The actual mini render: iframe rendered at full size then transform-
-     scaled so a 1920×1080 page fits 178×100 (the 178 = 180 - 2px border). */
+  /* The actual mini render: iframe uses the project's native resolution and
+     is transform-scaled into the per-aspect thumbnail bounds set by app.js. */
   .frames-strip .frame-thumb { width: 178px; height: 100px; background: #000;
     overflow: hidden; position: relative; }
   .frames-strip .frame-thumb iframe { position: absolute; top: 0; left: 0;
-    width: 1920px; height: 1080px; border: 0;
-    transform: scale(calc(178 / 1920)); transform-origin: top left;
+    width: var(--thumb-native-width, 1920px); height: var(--thumb-native-height, 1080px); border: 0;
+    transform: scale(var(--thumb-scale, calc(178 / 1920))); transform-origin: top left;
     pointer-events: none; }
   /* Native (enhanced) frame plays a rendered MP4 instead of an HTML iframe. */
   .frames-strip .frame-thumb video { position: absolute; top: 0; left: 0;

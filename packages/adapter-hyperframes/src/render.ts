@@ -14,9 +14,9 @@
  */
 
 import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, type Dirent } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
@@ -28,6 +28,94 @@ import type {
 import { HtmlVideoError } from '@html-video/core';
 
 const ADAPTER_VERSION = '0.2.0-playwright';
+
+export function shouldTrySystemBrowser(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Executable doesn't exist|browser executable.*not found/i.test(message);
+}
+
+export function systemBrowserChannels(
+  platform: NodeJS.Platform = process.platform,
+): Array<'chrome' | 'msedge'> {
+  return platform === 'win32' ? ['chrome', 'msedge'] : ['chrome'];
+}
+
+export function playwrightBrowserCacheRoot(
+  platform: NodeJS.Platform = process.platform,
+  home: string = homedir(),
+  configuredPath: string | undefined = process.env.PLAYWRIGHT_BROWSERS_PATH,
+): string {
+  if (configuredPath && configuredPath !== '0') return configuredPath;
+  if (platform === 'darwin') return join(home, 'Library', 'Caches', 'ms-playwright');
+  if (platform === 'win32') {
+    return process.env.LOCALAPPDATA
+      ? join(process.env.LOCALAPPDATA, 'ms-playwright')
+      : join(home, 'AppData', 'Local', 'ms-playwright');
+  }
+  return join(home, '.cache', 'ms-playwright');
+}
+
+export function cachedChromiumExecutables(
+  platform: NodeJS.Platform = process.platform,
+  cacheRoot: string = playwrightBrowserCacheRoot(platform),
+): string[] {
+  if (!existsSync(cacheRoot)) return [];
+  const dirs = readdirSync(cacheRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^chromium-\d+$/.test(entry.name))
+    .sort((a, b) => Number(a.name.slice(9)) - Number(b.name.slice(9)));
+  const matches: string[] = [];
+  const wanted = platform === 'win32'
+    ? /[\\/]chrome\.exe$/i
+    : platform === 'darwin'
+      ? /[\\/]Contents[\\/]MacOS[\\/](?:Chromium|Google Chrome for Testing)$/
+      : /[\\/]chrome$/;
+  const walk = (dir: string, depth: number) => {
+    if (depth < 0) return;
+    let entries: Dirent<string>[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path, depth - 1);
+      else if (entry.isFile() && wanted.test(path)) matches.push(path);
+    }
+  };
+  for (const dir of dirs) walk(join(cacheRoot, dir.name), 6);
+  return matches;
+}
+
+async function launchRenderBrowser(
+  chromium: typeof import('playwright').chromium,
+  options: import('playwright').LaunchOptions,
+): Promise<import('playwright').Browser> {
+  try {
+    return await chromium.launch(options);
+  } catch (error) {
+    if (!shouldTrySystemBrowser(error)) throw error;
+    const failures: string[] = [];
+    for (const executablePath of cachedChromiumExecutables()) {
+      try {
+        return await chromium.launch({ ...options, executablePath });
+      } catch (cacheError) {
+        failures.push(`${executablePath}: ${cacheError instanceof Error ? cacheError.message : String(cacheError)}`);
+      }
+    }
+    for (const channel of systemBrowserChannels()) {
+      try {
+        return await chromium.launch({ ...options, channel });
+      } catch (channelError) {
+        failures.push(`${channel}: ${channelError instanceof Error ? channelError.message : String(channelError)}`);
+      }
+    }
+    throw new HtmlVideoError(
+      'render-failed',
+      `Playwright's bundled Chromium is missing and no cached/system browser could be launched. Tried cached Chromium plus ${systemBrowserChannels().join(', ')}. ${failures.join(' | ')}`,
+    );
+  }
+}
 
 /** Real render: chromium records the page, ffmpeg transcodes to MP4. */
 export async function render(input: RenderInput, ctx: RenderContext): Promise<RenderOutput> {
@@ -68,7 +156,7 @@ export async function render(input: RenderInput, ctx: RenderContext): Promise<Re
   // actually start the animation, so ffmpeg can trim the dead opening lead-in.
   let leadInMs = 0;
   try {
-    browser = await playwright.chromium.launch({
+    browser = await launchRenderBrowser(playwright.chromium, {
       headless: true,
       args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
     });
