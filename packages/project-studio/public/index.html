@@ -1093,10 +1093,16 @@
     font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
   .gallery-card .preview .poster-fallback b { color: var(--text); font-size: 15px;
     font-weight: 600; line-height: 1.25; }
+  .gallery-card .card-actions { display: flex; justify-content: flex-end; padding: 0 14px 13px; }
+  .gallery-card .preview-btn { display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border-strong, var(--border)); background: var(--bg-subtle);
+    color: var(--text); border-radius: var(--radius-sm); padding: 6px 11px;
+    font: 600 11.5px var(--font-sans); cursor: pointer; transition: all .12s; }
+  .gallery-card .preview-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   /* ===== Template fullscreen preview (the "confirm before applying" modal) ===== */
   .tpl-preview-modal { z-index: 1100; }
-  .tpl-preview-modal .modal { width: min(1240px, 96vw); height: min(840px, 92vh);
+  .tpl-preview-modal .modal { width: min(1320px, 96vw); height: min(880px, 92vh);
     padding: 0; display: flex; flex-direction: column; gap: 0; }
   .tpl-preview-head { display: flex; align-items: center; gap: 14px;
     padding: 14px 18px; border-bottom: 1px solid var(--border); }
@@ -1107,20 +1113,36 @@
     color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px 8px;
     border-radius: var(--radius-sm); }
   .tpl-preview-head .modal-close:hover { color: var(--text); background: var(--bg-subtle); }
-  .tpl-preview-stage { flex: 1; background: #000; padding: 22px;
-    display: flex; align-items: flex-start; justify-content: center;
-    overflow: auto; }
-  .tpl-preview-frame { aspect-ratio: 16/9; background: #000; position: relative;
-    width: 100%; max-width: 100%; flex: 0 0 auto; border-radius: var(--radius);
-    overflow: hidden; }
-  .tpl-preview-frame.portrait { aspect-ratio: 9/16; max-width: none;
-    width: min(46%, 420px); }
-  .tpl-preview-frame iframe { position: absolute; top: 0; left: 0;
-    width: 1920px; height: 1080px; border: 0;
-    transform: scale(var(--tpl-preview-scale, 1)); transform-origin: top left; }
-  .tpl-preview-frame.portrait iframe { width: 1080px; height: 1920px; }
-  .tpl-preview-frame img.poster { position: absolute; inset: 0; width: 100%;
-    height: 100%; object-fit: contain; background: #000; }
+  .tpl-preview-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 250px;
+    background: var(--bg); overflow: hidden; }
+  .tpl-preview-samples-wrap { min-width: 0; display: flex; flex-direction: column;
+    padding: 18px; overflow: hidden; border-right: 1px solid var(--border); }
+  .tpl-preview-section-head { display: flex; justify-content: space-between; gap: 16px;
+    align-items: flex-start; margin-bottom: 14px; }
+  .tpl-preview-section-head h3, .tpl-preview-guide h3 { margin: 0; font-size: 12.5px; font-weight: 650; }
+  .tpl-preview-section-head p { margin: 4px 0 0; color: var(--text-muted); font-size: 11.5px; }
+  .tpl-preview-samples { min-height: 0; overflow: auto; display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-content: start; padding: 1px 3px 10px 1px; }
+  .tpl-sample { margin: 0; background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+  .tpl-sample-canvas { position: relative; padding-top: 56.25%; overflow: hidden; background: #080808; }
+  .tpl-sample-canvas iframe { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+    border: 0; pointer-events: none; transform: scale(var(--tpl-sample-scale, .25)); transform-origin: top left; }
+  .tpl-sample-canvas.portrait iframe { width: 1080px; height: 1920px; left: 50%;
+    transform: translateX(-50%) scale(var(--tpl-sample-scale, .18)); transform-origin: top center; }
+  .tpl-sample-canvas img { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; background: #080808; }
+  .tpl-sample figcaption { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; min-height: 38px; padding: 9px 11px; color: var(--text-muted); font-size: 11.5px; }
+  .tpl-sample figcaption b { color: var(--text); font-weight: 600; text-transform: capitalize; }
+  .tpl-sample figcaption span { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em; }
+  .tpl-preview-guide { padding: 20px 18px; overflow: auto; background: var(--bg-panel);
+    display: flex; flex-direction: column; gap: 24px; }
+  .tpl-preview-guide section { display: flex; flex-direction: column; gap: 11px; }
+  .tpl-preview-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .tpl-preview-chips span { padding: 5px 8px; border-radius: var(--radius-pill);
+    background: var(--bg-subtle); border: 1px solid var(--border); color: var(--text-muted); font-size: 10.5px; }
+  .tpl-preview-chips.motion span { background: var(--accent-soft); border-color: rgba(60,230,172,.24); color: var(--text); }
   .tpl-preview-source { padding: 11px 18px; border-top: 1px solid var(--border);
     background: var(--bg-panel); font-size: 12px; line-height: 1.5;
     color: var(--text-dim, #8a8a8a); display: flex; flex-direction: column; gap: 3px; }
@@ -1153,6 +1175,7 @@
   .tpl-preview-confirm-bar { padding: 10px 18px; border-top: 1px solid var(--accent);
     background: var(--accent-soft, rgba(60,230,172,.10)); display: flex;
     gap: 10px; align-items: center; justify-content: flex-end; }
+  .tpl-preview-confirm-bar[hidden] { display: none !important; }
   .tpl-preview-confirm-bar .tpl-preview-confirm-msg { flex: 1; font-size: 12.5px;
     color: var(--text); }
   .tpl-preview-confirm-bar button { background: var(--bg-subtle);
@@ -1163,6 +1186,13 @@
   .tpl-preview-confirm-bar button.primary { background: var(--accent);
     border-color: var(--accent); color: var(--accent-fg); font-weight: 500; }
   .tpl-preview-confirm-bar button.primary:hover { background: var(--accent-hover); }
+  @media (max-width: 840px) {
+    .tpl-preview-modal .modal { width: 96vw; height: 94vh; }
+    .tpl-preview-body { grid-template-columns: 1fr; overflow: auto; }
+    .tpl-preview-samples-wrap { overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); }
+    .tpl-preview-samples { overflow: visible; grid-template-columns: 1fr; }
+    .tpl-preview-guide { overflow: visible; }
+  }
   .chat-empty .empty-action { background: var(--accent); border: 1px solid var(--accent);
     color: var(--accent-fg); border-radius: var(--radius-sm); padding: 7px 12px;
     font: inherit; font-size: 12px; cursor: pointer; }
@@ -1380,11 +1410,26 @@
       <div class="desc" id="tpl-preview-desc"></div>
       <button class="modal-close" id="tpl-preview-close" data-i18n-attr="aria-label:tpl_preview.cancel" aria-label="取消">✕</button>
     </div>
-    <div class="tpl-preview-stage">
-      <div class="tpl-preview-frame" id="tpl-preview-frame">
-        <iframe id="tpl-preview-iframe" sandbox="allow-scripts allow-same-origin" src="about:blank"></iframe>
-        <img id="tpl-preview-poster" class="poster" alt="" hidden />
-      </div>
+    <div class="tpl-preview-body">
+      <section class="tpl-preview-samples-wrap">
+        <div class="tpl-preview-section-head">
+          <div>
+            <h3 data-i18n="tpl_preview.samples">内置样例帧</h3>
+            <p data-i18n="tpl_preview.samples_hint">仅展示静态关键帧，不播放动画或视频。</p>
+          </div>
+        </div>
+        <div class="tpl-preview-samples" id="tpl-preview-samples"></div>
+      </section>
+      <aside class="tpl-preview-guide">
+        <section>
+          <h3 data-i18n="tpl_preview.elements">内容元素</h3>
+          <div class="tpl-preview-chips" id="tpl-preview-elements"></div>
+        </section>
+        <section>
+          <h3 data-i18n="tpl_preview.motion">动效语言</h3>
+          <div class="tpl-preview-chips motion" id="tpl-preview-motion"></div>
+        </section>
+      </aside>
     </div>
     <div class="tpl-preview-source" id="tpl-preview-source" hidden></div>
     <div class="tpl-preview-confirm-bar" id="tpl-preview-confirm-bar" hidden>

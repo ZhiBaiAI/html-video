@@ -65,3 +65,41 @@ test('fallback data frames only reuse figures that exist in the script', () => {
   if (node?.kind !== 'data') return;
   assert.ok(node.data.items.every((item) => item.value === 6 || item.value === 10));
 });
+
+test('fallback chooses a data composition by meaning instead of frame order', () => {
+  const semanticTemplate = `<!doctype html><html><body>
+    <div class="frame hero"><h1>Hero</h1></div>
+    <div class="frame dashboard"><div class="c">A</div><div class="c">B</div></div>
+  </body></html>`;
+  const graph = buildLocalTemplateAdaptedGraph({
+    frameCount: 1,
+    perFrameDurationSec: 3,
+    contentTurns: [],
+    sourceTexts: [],
+    frameTexts: ['转化率从 18% 提升到 42%。'],
+    templateHtml: semanticTemplate,
+    fallbackSynopsis: '增长数据',
+  });
+
+  assert.equal(graph.nodes[0]?.kind, 'data');
+  assert.equal(graph.nodes[0]?.frameIntent, 'metric-card frame');
+});
+
+test('fallback chooses a process composition for ordered script content', () => {
+  const semanticTemplate = `<!doctype html><html><body>
+    <div class="frame hero"><h1>Hero</h1></div>
+    <div class="frame process"><div class="steps"><span>1</span><span>2</span></div></div>
+  </body></html>`;
+  const graph = buildLocalTemplateAdaptedGraph({
+    frameCount: 1,
+    perFrameDurationSec: 3,
+    contentTurns: [],
+    sourceTexts: [],
+    frameTexts: ['流程分三步：先收集素材，再完成分析，最后输出视频。'],
+    templateHtml: semanticTemplate,
+    fallbackSynopsis: '制作流程',
+  });
+
+  assert.equal(graph.nodes[0]?.kind, 'text');
+  assert.equal(graph.nodes[0]?.frameIntent, 'process/timeline frame');
+});

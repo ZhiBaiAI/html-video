@@ -3248,16 +3248,14 @@ function openGallery() {
   if (!state.selected) return;
   document.getElementById('gallery-modal').classList.add('show');
   const grid = document.getElementById('gallery');
+  const previewLabel = t('gallery.preview');
 
-  // Each card's iframe loads the template's actual entry HTML (`index.html`,
-  // dropped under templates/<id>/ so /template-asset/<id>/index.html serves
-  // it). The 1920×1080 (or 1080×1920) source is transform-scaled to fit
-  // the card via a CSS variable set per-card after layout.
+  // Cards stay lightweight. A visible preview button opens the static sample
+  // frame browser; selecting a template remains a separate confirmed action.
   grid.innerHTML = state.templates.map(t => {
     const sel = state.selected?.templateId === t.id ? ' selected' : '';
     const tags = (t.tags || []).slice(0, 4).map((tg) => `<span class="tag">${esc(tg)}</span>`).join('');
     const portrait = isPortraitTemplate(t);
-    const entry = templateEntryPath(t);
     // Gallery cards stay lightweight: use static posters when available and
     // reserve live iframes for the fullscreen preview. Loading dozens of
     // animated iframes at once creates noisy 404/resource warnings and makes
@@ -3275,6 +3273,9 @@ function openGallery() {
         <div class="desc">${esc(templateDescription(t))}</div>
         <div class="tags">${tags}</div>
       </div>
+      <div class="card-actions">
+        <button type="button" class="preview-btn" data-preview-id="${esc(t.id)}">▣ ${esc(previewLabel)}</button>
+      </div>
     </div>`;
   }).join('');
 
@@ -3288,26 +3289,12 @@ function openGallery() {
       if (tpl) openTemplatePreviewModal(tpl);
     };
   });
-
-  // Resize observer recomputes --gallery-scale per card so 1920×1080 fits
-  // the actual rendered card width.
-  setTimeout(() => applyGalleryScales(grid), 0);
-  if (galleryResizeObserver) galleryResizeObserver.disconnect();
-  galleryResizeObserver = new ResizeObserver(() => applyGalleryScales(grid));
-  grid.querySelectorAll('.gallery-card .preview').forEach((p) => galleryResizeObserver.observe(p));
-}
-
-let galleryResizeObserver = null;
-function applyGalleryScales(grid) {
-  grid.querySelectorAll('.gallery-card .preview').forEach((p) => {
-    const w = p.clientWidth;
-    if (!w) return;
-    const portrait = p.dataset.portrait === 'true';
-    // Landscape fills the 16:9 box by width. Portrait keeps the same 16:9
-    // box but is scaled to fit the box HEIGHT (1080×1920 → fit by height,
-    // centred), so its card stays the same height as the rest of the grid.
-    const scale = portrait ? p.clientHeight / 1920 : w / 1920;
-    p.style.setProperty('--gallery-scale', scale.toFixed(4));
+  grid.querySelectorAll('.preview-btn').forEach(btn => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      const tpl = state.templates.find((x) => x.id === btn.dataset.previewId);
+      if (tpl) openTemplatePreviewModal(tpl);
+    };
   });
 }
 
@@ -3316,21 +3303,8 @@ function isPortraitTemplate(t) {
   return aspects.includes('9:16') && !aspects.includes('16:9');
 }
 
-function templateEntryPath(t) {
-  // The template's entry HTML is declared as `source_entry` in its
-  // template.html-video.yaml — some templates use `source/index.html`,
-  // others a top-level `index.html`. The /api/templates response now
-  // surfaces this field; fall back to `index.html` only if it's missing.
-  const entry = t?.source_entry;
-  return typeof entry === 'string' && entry ? entry : 'index.html';
-}
-
 function closeGallery() {
   document.getElementById('gallery-modal').classList.remove('show');
-  if (galleryResizeObserver) {
-    galleryResizeObserver.disconnect();
-    galleryResizeObserver = null;
-  }
 }
 
 // ============== Template fullscreen preview ==============
@@ -3352,43 +3326,16 @@ function openTemplatePreviewModal(tpl) {
   });
 
   renderTemplateSource(tpl);
-
-  const frame = document.getElementById('tpl-preview-frame');
-  const portrait = isPortraitTemplate(tpl);
-  frame.classList.toggle('portrait', portrait);
-
-  const iframe = document.getElementById('tpl-preview-iframe');
-  const poster = document.getElementById('tpl-preview-poster');
-  const entry = templateEntryPath(tpl);
-  // Poster-mode templates render blank in a live iframe (need the unbuilt HF
-  // player) — show the shipped poster instead. Fall back to the iframe if the
-  // backend reported no poster file (poster_url null).
-  const usePoster = tpl.preview_mode === 'poster' && tpl.poster_url;
-  if (usePoster) {
-    iframe.src = 'about:blank';
-    iframe.hidden = true;
-    poster.src = `${tpl.poster_url}?t=${Date.now()}`;
-    poster.hidden = false;
-  } else {
-    poster.src = '';
-    poster.hidden = true;
-    iframe.hidden = false;
-    iframe.src = `/template-asset/${encodeURIComponent(tpl.id)}/${entry}?t=${Date.now()}`;
-  }
-
-  const apply = () => {
-    const w = frame.clientWidth;
-    const h = frame.clientHeight;
-    if (!w || !h) return;
-    const baseW = portrait ? 1080 : 1920;
-    const baseH = portrait ? 1920 : 1080;
-    const s = Math.min(w / baseW, h / baseH);
-    frame.style.setProperty('--tpl-preview-scale', s.toFixed(4));
-  };
-  apply();
+  renderTemplatePreviewGuide(tpl);
+  renderTemplateStaticSamples(tpl);
   if (_tplPreviewResizeObserver) _tplPreviewResizeObserver.disconnect();
-  _tplPreviewResizeObserver = new ResizeObserver(apply);
-  _tplPreviewResizeObserver.observe(frame);
+  _tplPreviewResizeObserver = new ResizeObserver((entries) => {
+    entries.forEach((entry) => applyTemplateSampleScale(entry.target));
+  });
+  modal.querySelectorAll('.tpl-sample-canvas').forEach((canvas) => {
+    applyTemplateSampleScale(canvas);
+    _tplPreviewResizeObserver.observe(canvas);
+  });
 
   const useBtn = document.getElementById('tpl-preview-use');
   const cancelBtn = document.getElementById('tpl-preview-cancel');
@@ -3476,6 +3423,48 @@ function openTemplatePreviewModal(tpl) {
   closeBtn.onclick = closeTemplatePreviewModal;
 }
 
+function renderTemplatePreviewGuide(tpl) {
+  const render = (id, prefix, values) => {
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.innerHTML = (values || []).map((value) => `<span>${esc(t(`${prefix}.${value}`))}</span>`).join('');
+  };
+  render('tpl-preview-elements', 'tpl_preview.element', tpl.preview_elements);
+  render('tpl-preview-motion', 'tpl_preview.motion', tpl.preview_motion);
+}
+
+function renderTemplateStaticSamples(tpl) {
+  const box = document.getElementById('tpl-preview-samples');
+  if (!box) return;
+  const portrait = isPortraitTemplate(tpl);
+  const frames = Array.isArray(tpl.preview_frames) && tpl.preview_frames.length
+    ? tpl.preview_frames
+    : tpl.poster_url
+      ? [{ label: 'overview', url: tpl.poster_url, kind: 'poster' }]
+      : [];
+  box.innerHTML = frames.map((frame, index) => {
+    const labelKey = `tpl_preview.frame.${frame.label}`;
+    const translated = t(labelKey);
+    const label = translated === labelKey ? frame.label : translated;
+    const media = frame.kind === 'poster'
+      ? `<img src="${esc(frame.url)}" alt="${esc(label)}" loading="lazy" />`
+      : `<iframe title="${esc(label)}" sandbox="allow-scripts allow-same-origin" src="${esc(frame.url)}&v=${Date.now()}" loading="lazy"></iframe>`;
+    return `<figure class="tpl-sample">
+      <div class="tpl-sample-canvas${portrait ? ' portrait' : ''}" data-portrait="${portrait}">${media}</div>
+      <figcaption><b>${esc(label)}</b><span>${String(index + 1).padStart(2, '0')} / ${String(frames.length).padStart(2, '0')}</span></figcaption>
+    </figure>`;
+  }).join('');
+}
+
+function applyTemplateSampleScale(canvas) {
+  const portrait = canvas?.dataset?.portrait === 'true';
+  const w = canvas?.clientWidth ?? 0;
+  const h = canvas?.clientHeight ?? 0;
+  if (!w || !h) return;
+  const scale = portrait ? h / 1920 : w / 1920;
+  canvas.style.setProperty('--tpl-sample-scale', scale.toFixed(4));
+}
+
 // Render the three-layer provenance (RFC-07) for the previewed template so the
 // upstream skill, its real author + license, and the original design lineage
 // are visible in the studio — not just buried in the template's yaml.
@@ -3525,11 +3514,9 @@ function closeTemplatePreviewModal() {
     _tplPreviewResizeObserver.disconnect();
     _tplPreviewResizeObserver = null;
   }
-  // Stop the iframe from continuing to play in the background.
-  const iframe = document.getElementById('tpl-preview-iframe');
-  if (iframe) iframe.src = 'about:blank';
-  const poster = document.getElementById('tpl-preview-poster');
-  if (poster) { poster.src = ''; poster.hidden = true; }
+  document.querySelectorAll('#tpl-preview-samples iframe').forEach((iframe) => { iframe.src = 'about:blank'; });
+  const samples = document.getElementById('tpl-preview-samples');
+  if (samples) samples.innerHTML = '';
   _tplPreviewCurrent = null;
 }
 

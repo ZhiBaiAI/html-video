@@ -5,6 +5,7 @@ import { setJsonMode, ok, fail } from './output.js';
 import { runDoctor } from './commands/doctor.js';
 import { listEngines } from './commands/list-engines.js';
 import { searchTemplates, inspectTemplate } from './commands/templates.js';
+import { auditTemplates } from './commands/template-audit.js';
 import {
   projectCreate,
   projectList,
@@ -65,6 +66,15 @@ cli
     setJsonMode(!!opts.json);
     const ctx = await bootstrap({ cwd: opts.cwd });
     await inspectTemplate(ctx, id);
+  });
+
+cli
+  .command('audit-templates', 'Audit template motion safety and content coverage')
+  .option('--strict', 'Exit non-zero when a template or coverage error is found')
+  .action(async (opts: any) => {
+    setJsonMode(!!opts.json);
+    const ctx = await bootstrap({ cwd: opts.cwd });
+    await auditTemplates(ctx, { strict: !!opts.strict });
   });
 
 // ====== project-* commands (RFC-05) ======

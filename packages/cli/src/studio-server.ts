@@ -138,7 +138,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       // List engines + templates
       if (url.pathname === '/api/templates' && m === 'GET') {
         return json(res, 200, {
-          templates: ctx.templates.list().map((t) => {
+          templates: await Promise.all(ctx.templates.list().map(async (t) => {
             // Decide how the gallery should preview this template:
             //  - 'iframe'  → the entry HTML is self-contained; render it live.
             //  - 'poster'  → the entry only references sub-compositions via
@@ -146,6 +146,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             //    built, v0.9) to show anything, so a live iframe is blank.
             //    Fall back to the shipped poster image instead.
             const { mode, posterUrl } = templatePreviewMode(t);
+            const staticPreview = await templateStaticPreview(t, posterUrl);
             return {
               id: t.id,
               name: t.name,
@@ -165,9 +166,12 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               preview: t.preview,
               preview_mode: mode,
               poster_url: posterUrl,
+              preview_frames: staticPreview.frames,
+              preview_elements: staticPreview.elements,
+              preview_motion: staticPreview.motion,
               output: t.output,
             };
-          }),
+          })),
         });
       }
 
@@ -2156,6 +2160,20 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         // touched — this rewrite happens only on the way out the wire.
         if (extname(filePath).toLowerCase() === '.html') {
           let html = await readFile(filePath, 'utf8');
+          const staticPreview = url.searchParams.get('static') === '1';
+          if (staticPreview) {
+            const frameIndex = Math.max(0, Number(url.searchParams.get('frame') ?? '0') || 0);
+            const progress = Math.max(0.08, Math.min(0.95, Number(url.searchParams.get('progress') ?? '0.68') || 0.68));
+            html = /data-composition-src/.test(html)
+              ? injectCompositionPlayer(html, t.id, { staticFrameIndex: frameIndex, staticProgress: progress })
+              : injectStaticTemplatePreview(html, { frameIndex, progress });
+            res.writeHead(200, {
+              'content-type': MIME['.html']!,
+              'cache-control': 'no-store, no-cache, must-revalidate',
+              pragma: 'no-cache',
+            });
+            return res.end(html);
+          }
           if (/data-composition-src/.test(html)) {
             html = injectCompositionPlayer(html, t.id);
             res.writeHead(200, {
@@ -2230,6 +2248,104 @@ function templatePreviewMode(
     return { mode: posterUrl ? 'poster' : 'iframe', posterUrl };
   }
   return { mode: 'iframe', posterUrl };
+}
+
+type StaticTemplatePreviewFrame = {
+  label: string;
+  url: string;
+  kind: 'iframe' | 'poster';
+  progress?: number;
+};
+
+async function templateStaticPreview(
+  t: TemplateMetadata,
+  posterUrl: string | null,
+): Promise<{ frames: StaticTemplatePreviewFrame[]; elements: string[]; motion: string[] }> {
+  const posterFrame = (): StaticTemplatePreviewFrame[] => posterUrl
+    ? [{ label: 'overview', url: posterUrl, kind: 'poster' }]
+    : [];
+  if (!t.__dir || !t.source_entry || t.native || !t.source_entry.endsWith('.html')) {
+    return { frames: posterFrame(), elements: templatePreviewElements(t, ''), motion: ['data-growth'] };
+  }
+
+  const entryPath = join(t.__dir, t.source_entry);
+  if (!existsSync(entryPath)) {
+    return { frames: posterFrame(), elements: templatePreviewElements(t, ''), motion: [] };
+  }
+  const source = await readFile(entryPath, 'utf8');
+  const encodedId = encodeURIComponent(t.id);
+  const encodedEntry = t.source_entry.split('/').map(encodeURIComponent).join('/');
+  const base = `/template-asset/${encodedId}/${encodedEntry}`;
+  const compositionPaths = Array.from(source.matchAll(/data-composition-src=["']([^"']+)["']/gi))
+    .map((match) => match[1] ?? '')
+    .filter(Boolean);
+  const uniqueCompositions = [...new Set(compositionPaths)].slice(0, 6);
+  let frames: StaticTemplatePreviewFrame[];
+
+  if (uniqueCompositions.length > 0) {
+    frames = uniqueCompositions.map((path, index) => ({
+      label: basename(path, extname(path)).replace(/[-_]+/g, ' '),
+      url: `${base}?static=1&frame=${index}&progress=.68`,
+      kind: 'iframe',
+      progress: 0.68,
+    }));
+  } else {
+    const frameCount = Math.min(6, extractTemplateFrameBlocks(source).length);
+    if (frameCount > 1) {
+      const labels = Array.from(source.matchAll(/class=["'][^"']*flabel[^"']*["'][^>]*>[\s\S]*?<b>([^<]+)<\/b>/gi))
+        .map((match) => (match[1] ?? '').trim());
+      frames = Array.from({ length: frameCount }, (_, index) => ({
+        label: labels[index] || `frame ${String(index + 1).padStart(2, '0')}`,
+        url: `${base}?static=1&frame=${index}&progress=.72`,
+        kind: 'iframe' as const,
+        progress: 0.72,
+      }));
+    } else {
+      // A single animated composition is shown as three frozen key moments.
+      // They are ordinary HTML frames, never a playing video/animation.
+      frames = [0.22, 0.58, 0.9].map((progress, index) => ({
+        label: ['opening', 'main', 'final'][index]!,
+        url: `${base}?static=1&frame=0&progress=${progress}`,
+        kind: 'iframe' as const,
+        progress,
+      }));
+    }
+  }
+  return {
+    frames: frames.length > 0 ? frames : posterFrame(),
+    elements: templatePreviewElements(t, source),
+    motion: templatePreviewMotion(source),
+  };
+}
+
+function templatePreviewElements(t: TemplateMetadata, source: string): string[] {
+  const hay = [t.category, t.subcategory ?? '', t.tags.join(' '), t.best_for.join(' '), source].join('\n');
+  const rules: Array<[string, RegExp]> = [
+    ['title', /headline|hero|title|cover|<h1\b/i],
+    ['body', /standfirst|subtitle|description|lede|<p\b/i],
+    ['list', /ledger|agenda|steps?|cards?|items?/i],
+    ['quote', /quote|blockquote|manifesto/i],
+    ['metrics', /metric|kpi|stat|number-counter|dashboard/i],
+    ['chart', /chart|graph|bar|ranking|rollup/i],
+    ['timeline', /timeline|process|workflow|phase/i],
+    ['diagram', /flowchart|decision|branching|node-graph|system-diagram|service-map/i],
+    ['code', /code|terminal|vscode|workbench/i],
+    ['media', /<img\b|<video\b|product-demo|showcase/i],
+    ['brand', /logo|brand|outro|end-card/i],
+  ];
+  return rules.filter(([, pattern]) => pattern.test(hay)).map(([key]) => key).slice(0, 7);
+}
+
+function templatePreviewMotion(source: string): string[] {
+  const motion: string[] = [];
+  if (/opacity|fade|reveal/i.test(source)) motion.push('fade');
+  if (/translate[XY3d(]|slide|sweep/i.test(source)) motion.push('slide');
+  if (/\bscale[XY(]|zoom|pop/i.test(source)) motion.push('scale');
+  if (/stagger/i.test(source)) motion.push('stagger');
+  if (/strokeDash|lineDraw|connector/i.test(source)) motion.push('line-draw');
+  if (/counter|rolled|barHeight|grow|chart/i.test(source)) motion.push('data-growth');
+  if (/gsap\.timeline|__timelines/i.test(source)) motion.push('timeline');
+  return [...new Set(motion)].slice(0, 6);
 }
 
 function autoSelectTemplate(
@@ -2335,7 +2451,11 @@ function templateSupportsAspect(t: TemplateMetadata, aspect: string): boolean {
  *   3. once every timeline has registered, play them all on a loop.
  * Templates on disk are untouched — this is a serve-time transform only.
  */
-function injectCompositionPlayer(html: string, templateId: string): string {
+function injectCompositionPlayer(
+  html: string,
+  templateId: string,
+  options: { staticFrameIndex?: number; staticProgress?: number } = {},
+): string {
   // 15s is a sane default duration for the preview loop; __VIDEO_SRC__ has no
   // real asset in-repo, so point it at an empty data URI to avoid a 404 fetch.
   let out = html
@@ -2357,6 +2477,8 @@ function injectCompositionPlayer(html: string, templateId: string): string {
 <script>
 (function () {
   var templateAssetBase = ${JSON.stringify(`/template-asset/${templateId}/`)};
+  var staticFrameIndex = ${options.staticFrameIndex ?? 'null'};
+  var staticProgress = ${options.staticProgress ?? 0.68};
   function reexec(root) {
     // Cloned/innerHTML'd <script> nodes don't run — recreate them so each
     // composition's timeline-registration IIFE actually executes. Skip the
@@ -2394,17 +2516,41 @@ function injectCompositionPlayer(html: string, templateId: string): string {
     window.__timelines = window.__timelines || {};
     var hosts = Array.prototype.slice.call(
       document.querySelectorAll('[data-composition-src]'));
-    await Promise.all(hosts.map(mountOne));
+    var activeHosts = hosts;
+    if (staticFrameIndex !== null) {
+      activeHosts = hosts.filter(function (host, index) {
+        var active = index === Math.min(staticFrameIndex, hosts.length - 1);
+        host.style.display = active ? 'block' : 'none';
+        if (active) {
+          host.style.opacity = '1';
+          host.style.visibility = 'visible';
+          host.setAttribute('data-start', '0');
+        }
+        return active;
+      });
+    }
+    await Promise.all(activeHosts.map(mountOne));
     // Give the just-injected <script> tags a tick to register timelines.
     setTimeout(function () {
       var tls = window.__timelines || {};
       Object.keys(tls).forEach(function (k) {
         var tl = tls[k];
-        if (tl && typeof tl.play === 'function') {
+        if (!tl) return;
+        if (staticFrameIndex !== null && typeof tl.pause === 'function') {
+          try {
+            if (typeof tl.totalProgress === 'function') tl.totalProgress(staticProgress);
+            else if (typeof tl.progress === 'function') tl.progress(staticProgress);
+            tl.pause();
+          } catch (e) {}
+        } else if (typeof tl.play === 'function') {
           try { tl.repeat(-1); } catch (e) {}
           tl.play(0);
         }
       });
+      if (staticFrameIndex !== null) {
+        document.querySelectorAll('video').forEach(function (video) { try { video.pause(); } catch (e) {} });
+        document.documentElement.setAttribute('data-hv-static-ready', 'true');
+      }
     }, 120);
   }
   if (document.readyState === 'loading') {
@@ -2415,6 +2561,69 @@ function injectCompositionPlayer(html: string, templateId: string): string {
 
   if (out.includes('</body>')) return out.replace('</body>', player + '\n</body>');
   return out + player;
+}
+
+function injectStaticTemplatePreview(
+  html: string,
+  options: { frameIndex: number; progress: number },
+): string {
+  const freezeStyle = `<style id="__hv_static_freeze">
+    *, *::before, *::after { animation-play-state: paused !important; }
+    html, body { overflow: hidden !important; }
+    .__hv_static_stage { width: 1920px; height: 1080px; overflow: hidden; display: grid; place-items: center; background: #000; }
+    .__hv_static_stage > .frame { width: 1920px !important; height: 1080px !important; max-width: none !important; aspect-ratio: auto !important; margin: 0 !important; box-shadow: none !important; }
+  </style>`;
+  let out = html;
+  if (/<head[^>]*>/i.test(out)) out = out.replace(/<head[^>]*>/i, (head) => `${head}\n${freezeStyle}`);
+  else out = `${freezeStyle}\n${out}`;
+
+  const script = `<script>
+(function () {
+  var frameIndex = ${options.frameIndex};
+  var progress = ${options.progress};
+  function freeze() {
+    var frames = Array.prototype.slice.call(document.querySelectorAll('.frame'));
+    if (frames.length > 1) {
+      var picked = frames[Math.min(frameIndex, frames.length - 1)];
+      if (picked) {
+        var stage = document.createElement('main');
+        stage.className = '__hv_static_stage';
+        stage.appendChild(picked.cloneNode(true));
+        document.body.replaceChildren(stage);
+      }
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        document.getAnimations().forEach(function (animation) {
+          try {
+            var timing = animation.effect && animation.effect.getComputedTiming
+              ? animation.effect.getComputedTiming()
+              : null;
+            var end = timing && Number.isFinite(timing.endTime) ? timing.endTime : 1000;
+            animation.currentTime = Math.max(1, end * progress);
+            animation.pause();
+          } catch (e) {}
+        });
+        var tls = window.__timelines || {};
+        Object.keys(tls).forEach(function (key) {
+          var tl = tls[key];
+          try {
+            if (typeof tl.totalProgress === 'function') tl.totalProgress(progress);
+            else if (typeof tl.progress === 'function') tl.progress(progress);
+            if (typeof tl.pause === 'function') tl.pause();
+          } catch (e) {}
+        });
+        document.querySelectorAll('video').forEach(function (video) { try { video.pause(); } catch (e) {} });
+        document.documentElement.setAttribute('data-hv-static-ready', 'true');
+      });
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', freeze, { once: true });
+  else freeze();
+})();
+</script>`;
+  if (out.includes('</body>')) return out.replace('</body>', `${script}\n</body>`);
+  return out + script;
 }
 
 async function serveFile(filePath: string, res: ServerResponse): Promise<void> {
@@ -3391,6 +3600,7 @@ function renderMotionExportContract(): string {
     'Motion/export contract (REQUIRED): the animation must be real browser-recordable motion that survives MP4 export.',
     'Use CSS @keyframes, a finite GSAP timeline that auto-plays, or requestAnimationFrame. The page must start motion by itself after load; do not rely on hover, scroll, clicks, or editor-only controls.',
     'Include visible change across the first 0.3-1.5 seconds (position, opacity, scale, stroke-dashoffset, counter/bar growth, wipe, or scene reveal), and keep a stable final state for the rest of the frame.',
+    'Use finite animation iterations. Do not use CSS infinite loops, GSAP repeat:-1, Math.random(), Date.now(), or timer-driven randomness; export must be deterministic at every timestamp.',
     'Do not output only a static end frame. Do not create paused-only timelines unless they are also exposed through window.__timelines and auto-play when opened normally.',
   ].join('\n');
 }
@@ -3889,7 +4099,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
 html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,sans-serif}
 .stage{width:100vw;height:100vh;display:grid;place-items:center;text-align:center;padding:6vw}
 h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;transform:translateY(24px)}
-.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out infinite alternate}
+.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out 2 alternate}
 @keyframes in{to{opacity:1;transform:none}}
 @keyframes move{to{transform:translateX(64vw) scale(.72);filter:hue-rotate(70deg)}}
 </style></head><body>
@@ -3925,7 +4135,7 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
 html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,sans-serif}
 .stage{width:100vw;height:100vh;display:grid;place-items:center;text-align:center;padding:6vw}
 h1{font-size:8vw;letter-spacing:-.03em;animation:in 1.2s ease forwards;opacity:0;transform:translateY(24px)}
-.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out infinite alternate}
+.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out 2 alternate}
 @keyframes in{to{opacity:1;transform:none}}
 @keyframes move{to{transform:translateX(64vw) scale(.72);filter:hue-rotate(70deg)}}
 </style></head><body>
@@ -4390,6 +4600,10 @@ async function runSplitMultiFrameGenerate(
       total: graph.nodes.length,
       text: frameTextForLocal,
       synopsis: graph.synopsis ?? '',
+      contentKind: node.kind,
+      structuredData: node.kind === 'data'
+        ? node.data as LocalTemplateFrameArgs['structuredData']
+        : undefined,
       type: pickedType || '分镜字幕',
       style: styleLabel || tmpl?.name || pickedStyle || '',
       captionMode: '关键句',
@@ -4453,7 +4667,7 @@ async function runSplitMultiFrameGenerate(
 html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,sans-serif}
 .stage{width:100vw;height:100vh;display:grid;place-items:center;text-align:center;padding:6vw}
 h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;transform:translateY(24px)}
-.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out infinite alternate}
+.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out 2 alternate}
 @keyframes in{to{opacity:1;transform:none}}
 @keyframes move{to{transform:translateX(64vw) scale(.72);filter:hue-rotate(70deg)}}
 </style></head><body>
@@ -5078,6 +5292,12 @@ type LocalTemplateFrameArgs = {
   total: number;
   text: string;
   synopsis: string;
+  contentKind?: 'text' | 'data' | 'entity';
+  structuredData?: {
+    title?: string;
+    unit?: string;
+    items: Array<{ label: string; value: number; note?: string }>;
+  };
   type?: string;
   style?: string;
   captionMode?: string;
@@ -5249,7 +5469,7 @@ function localGenericSelectedTemplateFrameHtml(args: LocalTemplateFrameArgs): st
       opacity: .86;
       transform: scale(1.01);
       transform-origin: center;
-      animation: templateDrift 8s ease-in-out infinite alternate;
+      animation: templateDrift 8s ease-in-out 2 alternate;
     }
     .shade {
       position: absolute;
@@ -5366,11 +5586,18 @@ function localStructuredTemplateFrameHtml(args: LocalTemplateFrameArgs): string 
   const frameBlocks = extractTemplateFrameBlocks(templateHtml);
   if (frameBlocks.length === 0) return undefined;
   const css = extractTemplateStyles(templateHtml);
-  const frame = frameBlocks[args.index % frameBlocks.length] ?? frameBlocks[0];
+  const frame = selectTemplateFrameBlock(frameBlocks, args);
   if (!frame) return undefined;
-  const itemTitles = templateFrameItemTitles(args.text, args.index);
-  const itemDescriptions = templateFrameItemDescriptions(args.text, itemTitles, args.index);
-  const metricValues = templateFrameMetricValues(args.text, args.index);
+  const structuredItems = args.structuredData?.items ?? [];
+  const itemTitles = structuredItems.length > 0
+    ? structuredItems.slice(0, 4).map((item) => truncateZh(item.label, 18))
+    : templateFrameItemTitles(args.text, args.index);
+  const itemDescriptions = structuredItems.length > 0
+    ? structuredItems.slice(0, 4).map((item) => truncateZh(item.note || item.label, 22))
+    : templateFrameItemDescriptions(args.text, itemTitles, args.index);
+  const metricValues = structuredItems.length > 0
+    ? structuredItems.slice(0, 4).map((item) => `${item.value}${args.structuredData?.unit ?? ''}`)
+    : templateFrameMetricValues(args.text, args.index);
   const data = {
     headline: headlineFromNarrationText(args.text),
     context: shortFrameContext(args.text),
@@ -5430,7 +5657,7 @@ ${css}
     }
     .hv-template-stage > .frame .glitch .step,
     .hv-template-stage > .frame [class*="glitch"] .step {
-      animation: hvGlitchDrift 6.2s ease-in-out infinite alternate;
+      animation: hvGlitchDrift 6.2s ease-in-out 2 alternate;
     }
     .hv-template-stage > .frame .ht {
       transform-origin: left center;
@@ -5455,7 +5682,7 @@ ${css}
     .hv-template-stage > .frame .r:nth-child(5) { animation-delay: 1.04s; }
     .hv-template-stage > .frame .pg { animation-delay: 1.12s; }
     .hv-template-stage > .frame .qr i.on {
-      animation: hvQrPulse 3.8s steps(2,end) infinite;
+      animation: hvQrPulse 3.8s steps(2,end) 2;
     }
     .hv-template-stage > .frame .qr i.on:nth-child(3n) { animation-delay: .44s; }
     .hv-template-stage > .frame .qr i.on:nth-child(4n) { animation-delay: .92s; }
@@ -5681,13 +5908,52 @@ function templateFrameProfileFromHtml(frameHtml: string): { kind: string; guidan
   const metricCards = count(/class=(["'])[^"']*\bc\b[^"']*\1/gi);
   const barRows = count(/class=(["'])[^"']*\brow\b[^"']*\1/gi);
   const tiles = count(/class=(["'])[^"']*\bt\b[^"']*\1/gi);
+  if (/class=(["'])[^"']*\b(?:steps?|timeline|process)\b[^"']*\1/i.test(frameHtml)) return { kind: 'process/timeline frame', guidance: 'needs 3-5 ordered phases with short action labels and outcomes' };
+  if (/before\s*\/\s*during\s*\/\s*after|\bbefore\b[\s\S]{0,300}\bafter\b|\bcomparison\b|\bversus\b|\bvs\.?\b/i.test(frameHtml)) return { kind: 'comparison frame', guidance: 'needs two comparable states, values, or approaches using the same unit and framing' };
+  if (/flowchart|decision|branching|node[- ]graph|system[- ]diagram|service[- ]map/i.test(frameHtml)) return { kind: 'flow/diagram frame', guidance: 'needs named nodes and explicit relationships or directional steps' };
+  if (/<code\b|<pre\b|terminal|editor-pane|workbench/i.test(frameHtml)) return { kind: 'code/terminal frame', guidance: 'needs a compact code, command, or developer-workflow example' };
   if (ledgerRows >= 2) return { kind: 'ledger/list frame', guidance: 'needs 3-4 short item titles plus short descriptions; avoid long paragraphs' };
-  if (metricCards >= 2) return { kind: 'metric-card frame', guidance: 'needs 2-4 metric values, labels, and one-line explanations' };
-  if (barRows >= 2) return { kind: 'bar/ranking frame', guidance: 'needs ranked labels and numeric values that can map to bar widths' };
+  if (/class=(["'])[^"']*\b(?:bars?|chart|track|fill|st|pstack)\b[^"']*\1/i.test(frameHtml) || barRows >= 2) return { kind: 'bar/ranking frame', guidance: 'needs ranked labels and numeric values that can map to bar lengths or heights' };
+  if (metricCards >= 2 || /dashboard|metrics?|\bkpi\b/i.test(frameHtml)) return { kind: 'metric-card frame', guidance: 'needs 2-4 metric values, labels, and one-line explanations' };
   if (/class=(["'])[^"']*\bfig\b[^"']*\1/i.test(frameHtml)) return { kind: 'big-stat frame', guidance: 'needs one large number or short punchline plus a supporting sentence' };
   if (tiles >= 2) return { kind: 'topic-tile frame', guidance: 'needs 2-4 compact topic labels' };
   if (/class=(["'])[^"']*\bq\b[^"']*\1|blockquote/i.test(frameHtml)) return { kind: 'quote frame', guidance: 'needs one memorable sentence, not a list' };
   return { kind: 'hero/title frame', guidance: 'needs one strong headline and one short supporting line' };
+}
+
+function selectTemplateFrameBlock(frameBlocks: string[], args: Pick<LocalTemplateFrameArgs, 'index' | 'total' | 'text' | 'contentKind'>): string | undefined {
+  if (frameBlocks.length === 0) return undefined;
+  const fallbackIndex = args.index % frameBlocks.length;
+  const text = args.text.toLowerCase();
+  const numericValues = Array.from(text.matchAll(/(?<![\p{L}\p{N}])\d+(?:\.\d+)?%?/gu));
+  const wantsData = args.contentKind === 'data' || numericValues.length >= 2;
+  const wantsProcess = /步骤|流程|阶段|先.+再|首先|其次|最后|step|process|phase|timeline|workflow/i.test(text);
+  const wantsComparison = /对比|比较|相比|从.+到|原来.+现在|之前.+之后|提升|下降|增长|减少|before|after|versus|\bvs\.?\b/i.test(text);
+  const wantsQuote = /金句|观点|认为|表示|quote|“|”|「|」/.test(text);
+  const wantsCode = /代码|命令|终端|编辑器|开发者|code|terminal|command|developer|vscode/i.test(text);
+  const wantsDiagram = /关系|系统|网络|节点|决策|分支|调度|链路|flow|system|network|decision|dispatch/i.test(text);
+
+  let bestIndex = fallbackIndex;
+  let bestScore = 0;
+  frameBlocks.forEach((frame, i) => {
+    const kind = templateFrameProfileFromHtml(frame).kind;
+    let score = 0;
+    if (wantsData && /metric|bar|stat|ledger/.test(kind)) score += 50;
+    if (wantsComparison && /comparison|bar|metric/.test(kind)) score += 36;
+    if (wantsProcess && /process|timeline|ledger|list/.test(kind)) score += 42;
+    if (wantsDiagram && /flow|diagram|process/.test(kind)) score += 42;
+    if (wantsCode && /code|terminal/.test(kind)) score += 48;
+    if (wantsQuote && /quote/.test(kind)) score += 36;
+    if (args.index === 0 && /hero|title/.test(kind)) score += 18;
+    if (args.index === args.total - 1 && /quote|hero|title/.test(kind)) score += 12;
+    // Prefer different equally suitable compositions as the storyboard moves.
+    score -= Math.abs(i - fallbackIndex) * 0.1;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  });
+  return frameBlocks[bestIndex] ?? frameBlocks[0];
 }
 
 function templateTextFromGraphNode(node: unknown, fallback: string): string {
@@ -5739,7 +6005,16 @@ export function buildLocalTemplateAdaptedGraph(args: {
     : [];
   const nodes = Array.from({ length: args.frameCount }, (_, i) => {
     const text = segments[i] || segments[segments.length - 1] || args.fallbackSynopsis;
-    const profile = templateFrameProfileFromHtml(frameBlocks[i % Math.max(1, frameBlocks.length)] ?? '');
+    const realNumbers = Array.from(text.matchAll(/(?<![\p{L}\p{N}])\d+(?:\.\d+)?%?/gu))
+      .map((match) => Number.parseFloat(match[0]))
+      .filter(Number.isFinite);
+    const selectedFrame = selectTemplateFrameBlock(frameBlocks, {
+      index: i,
+      total: args.frameCount,
+      text,
+      contentKind: realNumbers.length >= 2 ? 'data' : 'text',
+    });
+    const profile = templateFrameProfileFromHtml(selectedFrame ?? '');
     const id = `frame_${i + 1}`;
     const label = headlineFromNarrationText(text);
     const base = {
@@ -5749,9 +6024,6 @@ export function buildLocalTemplateAdaptedGraph(args: {
       durationSec: args.perFrameDurationSec,
     };
     if (/metric|bar|stat|ledger|list|tile/i.test(profile.kind)) {
-      const realNumbers = Array.from(text.matchAll(/(?<![\p{L}\p{N}])\d+(?:\.\d+)?%?/gu))
-        .map((match) => Number.parseFloat(match[0]))
-        .filter(Number.isFinite);
       // Never invent chart values merely because the selected template contains
       // a metric composition. Without at least two real figures, keep the node
       // as grounded text and let the renderer adapt the template structure.
@@ -6009,7 +6281,7 @@ function localWechatAiDispatchTranscriptFrameHtml(args: LocalTemplateFrameArgs):
     .pill { margin-top: 30px; width: 430px; min-height: 78px; display: flex; align-items: center; padding: 0 30px; border: 3px solid var(--ink); border-radius: 16px; background: rgba(255,255,255,.5); font-size: 25px; font-weight: 760; opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.35s forwards; }
     .network { position: absolute; left: 690px; right: 58px; top: 74px; bottom: 64px; }
     .map-title { position: absolute; left: 0; top: 0; color: var(--muted); font: 800 18px var(--mono); letter-spacing: .1em; }
-    .hub { position: absolute; left: 46%; top: 48%; width: 214px; height: 214px; border-radius: 50%; border: 5px solid var(--blue); background: #edf6ff; display: grid; place-items: center; color: var(--blue); box-shadow: 0 0 0 18px var(--blue-soft); transform: translate(-50%,-50%) scale(.86); opacity: 0; animation: hub .75s cubic-bezier(.16,1,.3,1) 1s forwards, pulse 2.6s ease-in-out 2s infinite; }
+    .hub { position: absolute; left: 46%; top: 48%; width: 214px; height: 214px; border-radius: 50%; border: 5px solid var(--blue); background: #edf6ff; display: grid; place-items: center; color: var(--blue); box-shadow: 0 0 0 18px var(--blue-soft); transform: translate(-50%,-50%) scale(.86); opacity: 0; animation: hub .75s cubic-bezier(.16,1,.3,1) 1s forwards, pulse 2.6s ease-in-out 2s 2; }
     .hub small { display: block; text-align: center; font-size: 22px; margin-bottom: 8px; }
     .hub b { display: block; font-size: 60px; line-height: 1; }
     .node { position: absolute; width: 205px; height: 118px; padding: 22px 26px; border: 3px solid rgba(32,37,33,.22); background: rgba(255,255,255,.5); opacity: 0; transform: translateY(18px); animation: in .52s ease-out forwards; }
