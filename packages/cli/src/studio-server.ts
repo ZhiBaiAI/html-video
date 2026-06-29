@@ -4,7 +4,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, copyFile, mkdir } from 'node:fs/promises';
+import { readFile, copyFile, mkdir, readdir } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
 import { dirname, extname, join, resolve, basename, posix, win32 } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -1521,10 +1521,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           || (existsSync(priorHtmlPath) ? await readFile(priorHtmlPath, 'utf8') : '');
         let exampleHtml = '';
         if (tmpl) {
-          const exampleHtmlPath = join(tmpl.__dir!, tmpl.source_entry);
-          if (existsSync(exampleHtmlPath)) {
-            exampleHtml = await readFile(exampleHtmlPath, 'utf8');
-          }
+          exampleHtml = await loadTemplateGenerationSource(tmpl);
         }
 
         // Carry source material across turns: a link/file is usually attached
@@ -4047,6 +4044,18 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
     // multi-frame batches. Cap at 10 (high frame counts get progressively
     // less reliable in a single pass), and tell the model so it can plan.
     const requestedFrames = Math.max(1, Math.min(10, Number(collected.frame_count ?? '4') || 4));
+    const templateSubject = [...contentTurns, openingTopic ?? ''].filter(Boolean).join(' ');
+    const templateReference = tmpl && baseHtml
+      ? buildTemplateGenerationReference({
+          templateName: tmpl.name_zh ?? tmpl.name,
+          templateDescription: tmpl.description_zh ?? tmpl.description,
+          templateHtml: baseHtml,
+          index: 0,
+          total: requestedFrames,
+          text: templateSubject,
+          contentKind: /\d+(?:\.\d+)?/.test(templateSubject) ? 'data' : 'text',
+        })
+      : '';
     // ⚠️ FALLBACK ONLY. Real multi-frame generation goes through
     // runSplitMultiFrameGenerate (the server routes frame_count>1 there before
     // ever reaching this single-shot prompt). This branch only fires if that
@@ -4110,23 +4119,25 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
       p.push(`(continue with the same shape for the remaining frames — \`\`\`html#frame_2 … \`\`\`html#frame_${requestedFrames})`);
       if (baseHtml && baseHtml.length > 0) {
         p.push('');
-        p.push(tmpl
-          ? `Template HTML — this is the REQUIRED visual style. Reuse its palette, layout, typography, and animation approach; change only the text/data to fit the source material. Do NOT switch to a different look (no dark "cosmic particle" default, etc.):`
-          : `Prior preview HTML to draw style from:`);
-        p.push('```html');
-        p.push(baseHtml.slice(0, 3000));
-        p.push('```');
+        if (templateReference) p.push(templateReference);
+        else {
+          p.push(`Prior preview HTML to draw style from:`);
+          p.push('```html');
+          p.push(baseHtml.slice(0, 3000));
+          p.push('```');
+        }
       }
     } else {
       p.push(`Output (single-frame): begin your reply with \`\`\`html and end with \`\`\`. Nothing outside the block.`);
       p.push('');
       if (baseHtml && baseHtml.length > 0) {
-        p.push(tmpl
-          ? `Template HTML — this is the REQUIRED visual style. Reuse its palette, layout, typography, and animation approach; change only the text/data to fit the source material. Do NOT switch to a different look:`
-          : `Prior preview HTML (iterate on its visual style if it fits, or replace if a different vibe is better):`);
-        p.push('```html');
-        p.push(baseHtml.slice(0, 4000));
-        p.push('```');
+        if (templateReference) p.push(templateReference);
+        else {
+          p.push(`Prior preview HTML (iterate on its visual style if it fits, or replace if a different vibe is better):`);
+          p.push('```html');
+          p.push(baseHtml.slice(0, 4000));
+          p.push('```');
+        }
       } else {
         p.push(`Skeleton to extend (replace placeholder with the inputs above; expand styling per the chosen type / style):`);
         p.push('```html');
@@ -4374,13 +4385,7 @@ async function runSplitMultiFrameGenerate(
   // template (e.g. Swiss Grid: light grey + black/gold serif) came out as a
   // generic dark theme. Read the real source once and force it into each frame.
   let templateHtml = '';
-  if (tmpl?.__dir && tmpl.source_entry) {
-    try {
-      const { readFileSync } = await import('node:fs');
-      const p = join(tmpl.__dir, tmpl.source_entry);
-      if (existsSync(p)) templateHtml = readFileSync(p, 'utf8');
-    } catch { /* fall back to description-only */ }
-  }
+  if (tmpl?.__dir && tmpl.source_entry) templateHtml = await loadTemplateGenerationSource(tmpl);
   const aspect = ((collected.aspect ?? '16:9').split(/\s+/)[0] ?? '16:9');
   const frameCountReq = Math.max(2, Math.min(10, Number(collected.frame_count ?? '4') || 4));
   // Opt-in (format card): render data frames natively with Remotion. When on,
@@ -4595,6 +4600,17 @@ async function runSplitMultiFrameGenerate(
 
     const frameContext = describeNode(node);
     const frameTextForLocal = templateTextFromGraphNode(node, frameContext);
+    const templateReference = templateHtml && tmpl
+      ? buildTemplateGenerationReference({
+          templateName: tmpl.name_zh ?? tmpl.name,
+          templateDescription: tmpl.description_zh ?? tmpl.description,
+          templateHtml,
+          index: i,
+          total: graph.nodes.length,
+          text: frameTextForLocal,
+          contentKind: node.kind,
+        })
+      : '';
     const localTemplateFrame = localTemplateFrameHtml({
       index: i,
       total: graph.nodes.length,
@@ -4651,12 +4667,8 @@ async function runSplitMultiFrameGenerate(
     fp.push(`Output: begin with \`\`\`html and end with \`\`\`. Inline CSS + JS, full-bleed ${resolution}, opens with an animation timeline. Tag visible text with data-hv-text. CDN imports (Tailwind, GSAP) fine. No prose outside the block.`);
     fp.push(renderMotionExportContract());
     fp.push('');
-    if (templateHtml) {
-      // A template is selected → its HTML is the REQUIRED look for every frame.
-      fp.push(`Template HTML — this is the REQUIRED visual language for THIS frame. Reuse its palette, background, typography, spacing, component shapes and animation vocabulary. Select or adapt its structural patterns to explain this frame's meaning; do NOT merely replace sample text in the existing composition. Do NOT invent a different theme (no generic dark background unless the template itself is dark):`);
-      fp.push('```html');
-      fp.push(templateHtml.slice(0, 4000));
-      fp.push('```');
+    if (templateReference) {
+      fp.push(templateReference);
       fp.push('');
       fp.push(`Keep all ${graph.nodes.length} frames visually consistent with this template so they read as one video.`);
     } else {
@@ -4715,8 +4727,8 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
         `Style: ${styleLabel || 'tasteful default'}.`,
         `Resolution: ${resolution}.`,
         contentTurns.length ? `Content: ${contentTurns.join(' / ').slice(0, 200)}` : '',
-        templateHtml
-          ? `Selected template HTML remains REQUIRED. Match this style instead of falling back to a generic theme:\n\`\`\`html\n${templateHtml.slice(0, 4000)}\n\`\`\``
+        templateReference
+          ? templateReference
           : '',
         `Begin your reply with \`\`\`html. Inline CSS, opens with animation, tag text with data-hv-text. No prose.`,
         renderMotionExportContract(),
@@ -5858,6 +5870,14 @@ function extractTemplateFrameBlocks(html: string): string[] {
   return out;
 }
 
+function extractTemplateGenerationBlocks(html: string): string[] {
+  const frames = extractTemplateFrameBlocks(html);
+  if (frames.length > 0) return frames;
+  return Array.from(html.matchAll(/<template\b[^>]*>([\s\S]*?)<\/template>/gi))
+    .map((match) => match[1]?.trim() ?? '')
+    .filter(Boolean);
+}
+
 function extractBalancedDiv(html: string, start: number): string | undefined {
   const tagRe = /<\/?div\b[^>]*>/gi;
   tagRe.lastIndex = start;
@@ -5894,12 +5914,48 @@ function splitFrameSentences(text: string, max: number): string[] {
 
 function selectedTemplateStructureBrief(templateHtml: string): string {
   if (!isRenderableHtmlTemplate(templateHtml)) return '';
-  const frames = extractTemplateFrameBlocks(templateHtml).slice(0, 8);
+  const frames = extractTemplateGenerationBlocks(templateHtml).slice(0, 8);
   if (frames.length === 0) return '';
   return frames.map((frame, i) => {
     const profile = templateFrameProfileFromHtml(frame);
     return `  ${i + 1}. ${profile.kind}: ${profile.guidance}`;
   }).join('\n');
+}
+
+export function buildTemplateGenerationReference(args: {
+  templateName: string;
+  templateDescription?: string;
+  templateHtml: string;
+  index: number;
+  total: number;
+  text: string;
+  contentKind?: 'text' | 'data' | 'entity';
+}): string {
+  const frames = extractTemplateGenerationBlocks(args.templateHtml);
+  const selected = selectTemplateFrameBlock(frames, {
+    index: args.index,
+    total: args.total,
+    text: args.text,
+    contentKind: args.contentKind,
+  });
+  const rootTokens = /:root\s*\{([\s\S]*?)\}/i.exec(args.templateHtml)?.[1]?.trim();
+  const styles = extractTemplateStyles(args.templateHtml);
+  const styleContract = rootTokens
+    ? `:root { ${rootTokens.slice(0, 1500)} }`
+    : styles.slice(0, 1800);
+  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(args.templateHtml)?.[1] ?? '';
+  const structure = (selected || body || args.templateHtml)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 3200);
+  const profile = templateFrameProfileFromHtml(selected ?? structure);
+  return [
+    `SELECTED TEMPLATE CONTRACT (REQUIRED): ${args.templateName}${args.templateDescription ? ` — ${args.templateDescription}` : ''}`,
+    `Use this exact visual system and the selected "${profile.kind}" composition structure. Preserve its palette, typography, spacing, borders, shapes, density and motion vocabulary. Replace sample content with the user's content; do not replace the design with a generic theme.`,
+    styleContract ? `STYLE TOKENS / CORE CSS:\n\`\`\`css\n${styleContract}\n\`\`\`` : '',
+    structure ? `SEMANTICALLY MATCHED TEMPLATE FRAME:\n\`\`\`html\n${structure}\n\`\`\`` : '',
+  ].filter(Boolean).join('\n\n');
 }
 
 function templateFrameProfileFromHtml(frameHtml: string): { kind: string; guidance: string } {
@@ -6211,6 +6267,34 @@ function templateDirectoryFileUrl(templateDir: string): string {
 
 function isRenderableHtmlTemplate(source: string): boolean {
   return /<!doctype\s+html|<html\b|<body\b/i.test(source);
+}
+
+export async function loadTemplateGenerationSource(tmpl: TemplateMetadata): Promise<string> {
+  if (!tmpl.__dir || !tmpl.source_entry) return '';
+  const entryPath = join(tmpl.__dir, tmpl.source_entry);
+  if (!existsSync(entryPath)) return '';
+  const entry = await readFile(entryPath, 'utf8');
+  const chunks = [entry];
+
+  if (tmpl.native) {
+    const sourceDir = dirname(entryPath);
+    const files = (await readdir(sourceDir)).filter((file) => /\.(?:tsx?|jsx?|css)$/i.test(file)).sort();
+    for (const file of files) {
+      if (join(sourceDir, file) === entryPath) continue;
+      chunks.push(`\n<!-- ${file} -->\n${await readFile(join(sourceDir, file), 'utf8')}`);
+    }
+  } else if (extname(entryPath).toLowerCase() === '.html') {
+    const refs = [...new Set(Array.from(entry.matchAll(/data-composition-src=["']([^"']+)["']/gi))
+      .map((match) => match[1] ?? '')
+      .filter(Boolean))];
+    for (const ref of refs) {
+      const file = resolve(dirname(entryPath), ref);
+      if (isPathInside(tmpl.__dir, file) && existsSync(file)) {
+        chunks.push(`\n<!-- composition: ${ref} -->\n${await readFile(file, 'utf8')}`);
+      }
+    }
+  }
+  return chunks.join('\n');
 }
 
 function templatePosterFileUrl(tmpl?: { __dir?: string; preview?: { poster?: string } } | null): string {

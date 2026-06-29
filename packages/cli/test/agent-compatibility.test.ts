@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildTemplateGenerationReference,
   buildLocalTemplateAdaptedGraph,
   compatibleAgentModelForError,
   summarizeAgentFailure,
@@ -102,4 +103,26 @@ test('fallback chooses a process composition for ordered script content', () => 
 
   assert.equal(graph.nodes[0]?.kind, 'text');
   assert.equal(graph.nodes[0]?.frameIntent, 'process/timeline frame');
+});
+
+test('template generation reference includes the semantically matched frame beyond the source prefix', () => {
+  const templateHtml = `<!doctype html><html><head><style>:root{--paper:#f4f0e8;--ink:#1838d8}</style></head><body>
+    ${'<!-- long design documentation -->'.repeat(180)}
+    <div class="frame hero"><h1>Generic cover</h1></div>
+    <div class="frame dashboard"><div class="c">Revenue</div><div class="c">Margin</div></div>
+  </body></html>`;
+  const reference = buildTemplateGenerationReference({
+    templateName: 'Cobalt Report',
+    templateDescription: 'Editorial data system',
+    templateHtml,
+    index: 1,
+    total: 3,
+    text: '营收从 18 增长到 42，利润率提升到 65%。',
+    contentKind: 'data',
+  });
+
+  assert.match(reference, /SELECTED TEMPLATE CONTRACT/);
+  assert.match(reference, /--paper:#f4f0e8/);
+  assert.match(reference, /Revenue/);
+  assert.doesNotMatch(reference, /Generic cover/);
 });
