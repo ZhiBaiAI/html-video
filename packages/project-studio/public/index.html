@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>html-video · Studio</title>
+<title>html-video · 视频工作台</title>
 <link rel="stylesheet" href="/tokens.css?v=0.9-hyperframes" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,14 +15,17 @@
   html, body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
     height: 100vh; overflow: hidden; font-size: 13.5px; line-height: 1.5; }
   button, input, textarea, select { font-family: inherit; font-size: inherit; }
+  button { -webkit-tap-highlight-color: transparent; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible,
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   a { color: var(--accent); }
 
-  .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+  .app { display: grid; grid-template-rows: 60px 1fr; height: 100vh; }
 
   /* ===== Top toolbar ===== */
   .toolbar { background: var(--bg-panel); border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 12px; padding: 0 16px; min-width: 0;
-    overflow: hidden; }
+    overflow: hidden; box-shadow: var(--shadow-xs); }
   .toolbar .brand { display: flex; align-items: center; gap: 10px; padding-right: 14px;
     border-right: 1px solid var(--border); margin-right: 6px; }
   .toolbar .brand .logo { width: 28px; height: 28px; border-radius: var(--radius-sm);
@@ -120,7 +123,7 @@
     padding: 8px 14px; border-radius: var(--radius-sm); font-weight: 500; cursor: pointer;
     font-size: 12.5px; transition: background .15s;
     white-space: nowrap; flex: 0 0 auto;
-    box-shadow: inset 0 -1px 0 rgba(0,0,0,.08), 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: inset 0 -1px 0 rgba(0,0,0,.08), 0 4px 10px rgba(60,230,172,.18); }
   .toolbar .export-btn:hover:not(:disabled) { background: var(--accent-hover); }
   .toolbar .export-btn:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
   /* One-click narrate-to-video — secondary, sits left of Export. */
@@ -539,7 +542,7 @@
     border-color: var(--accent); }
   .form-card .form-field .form-seg-btn.selected {
     background: var(--accent); border-color: var(--accent);
-    color: var(--accent-fg); box-shadow: 0 2px 6px rgba(201, 100, 66, .2); }
+    color: var(--accent-fg); box-shadow: 0 2px 6px rgba(60,230,172,.2); }
   .form-card .form-field .form-seg-btn:disabled { opacity: .55; cursor: not-allowed; }
   .form-card .form-attachments { margin-top: 12px; padding-top: 10px;
     border-top: 1px dashed var(--border); }
@@ -555,7 +558,7 @@
   .form-card .form-submit { background: var(--accent); color: var(--accent-fg);
     border: 0; padding: 7px 16px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 12.5px; font-weight: 500;
-    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: 0 4px 10px rgba(60,230,172,.18); }
   .form-card .form-submit:hover { background: var(--accent-hover); }
 
   /* ===== hv-confirm (start-or-edit card) ===== */
@@ -580,7 +583,7 @@
   .confirm-card .confirm-go { background: var(--accent); color: var(--accent-fg);
     border: 0; padding: 7px 14px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 12.5px; font-weight: 500; flex: 1;
-    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: 0 4px 10px rgba(60,230,172,.18); }
   .confirm-card .confirm-go:hover { background: var(--accent-hover); }
   .confirm-card .confirm-edit { background: var(--bg);
     border: 1px solid var(--border); color: var(--text);
@@ -744,7 +747,7 @@
   .frames-strip button.frame-tab.active { border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-soft); }
   .frames-strip button.frame-tab.focus { border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(201, 100, 66, .25); }
+    box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(60,230,172,.25); }
   .frames-strip .frame-thumb .focus-mark { position: absolute; top: 4px;
     right: 4px; width: 22px; height: 22px; display: grid; place-items: center;
     background: var(--accent); color: var(--accent-fg); border-radius: 50%;
@@ -775,7 +778,7 @@
     animation: hvEnhancePulse 1.8s ease-in-out infinite; }
   @keyframes hvEnhancePulse {
     0%,100% { box-shadow: 0 2px 8px rgba(0,0,0,.45); }
-    50% { box-shadow: 0 0 0 4px rgba(255,90,44,.35), 0 2px 8px rgba(0,0,0,.45); } }
+    50% { box-shadow: 0 0 0 4px rgba(60,230,172,.32), 0 2px 8px rgba(0,0,0,.45); } }
   .frames-strip button.frame-tab .frame-enhance:hover { filter: brightness(1.12);
     transform: translateX(-50%) scale(1.04); }
   .frames-strip button.frame-tab .frame-enhance.on { background: rgba(20,20,24,.82);
@@ -994,7 +997,7 @@
      after the section split these rendered as unstyled grey defaults. */
   .st-generate { background: var(--accent); color: var(--accent-fg);
     border: 0; padding: 7px 16px; border-radius: var(--radius-sm); cursor: pointer;
-    font-size: 12.5px; font-weight: 500; box-shadow: 0 4px 10px rgba(201, 100, 66, .18);
+    font-size: 12.5px; font-weight: 500; box-shadow: 0 4px 10px rgba(60,230,172,.18);
     transition: background .12s; }
   .st-generate:hover:not(:disabled) { background: var(--accent-hover); }
   .st-generate:disabled,
@@ -1033,10 +1036,10 @@
   .toast.error { border-color: var(--red); color: var(--red); }
 
   /* ===== Modal: gallery ===== */
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none;
+  .modal-bg { position: fixed; inset: 0; background: rgba(10,10,10,.48); display: none;
     align-items: center; justify-content: center; z-index: 100; }
   .modal-bg.show { display: flex; }
-  .modal { background: var(--bg-elevated); box-shadow: var(--shadow-lg);
+  .modal { background: var(--bg-elevated); box-shadow: var(--shadow-lg); border: 1px solid var(--border);
     border-radius: var(--radius-lg); padding: 24px; width: 92vw; max-width: 1200px;
     max-height: 86vh; display: flex; flex-direction: column; }
   .modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -1142,13 +1145,13 @@
   .tpl-preview-foot button:hover { border-color: var(--accent); }
   .tpl-preview-foot button.primary { background: var(--accent);
     border-color: var(--accent); color: var(--accent-fg); font-weight: 500;
-    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: 0 4px 10px rgba(60,230,172,.18); }
   .tpl-preview-foot button.primary:hover { background: var(--accent-hover); }
   .tpl-preview-foot .meta { font-size: 11.5px; color: var(--text-muted);
     font-family: var(--font-mono); }
   /* Inline confirm bar (replaces blocking confirm() dialog) */
   .tpl-preview-confirm-bar { padding: 10px 18px; border-top: 1px solid var(--accent);
-    background: var(--accent-soft, rgba(201,100,66,.08)); display: flex;
+    background: var(--accent-soft, rgba(60,230,172,.10)); display: flex;
     gap: 10px; align-items: center; justify-content: flex-end; }
   .tpl-preview-confirm-bar .tpl-preview-confirm-msg { flex: 1; font-size: 12.5px;
     color: var(--text); }
@@ -1193,6 +1196,27 @@
     border-color: var(--accent); font-weight: 500; }
   .small-modal button.primary:hover { background: var(--accent-hover); }
 
+  /* Shared control rhythm: primary/secondary actions use the same height,
+     corner radius, focus behavior and press feedback across all panels. */
+  .toolbar .export-btn, .toolbar .narrate-btn, .new-project,
+  .composer .send-btn, .small-modal button, .modal-close,
+  .tpl-preview-foot button, .tpl-preview-confirm-bar button,
+  .narrate-foot .primary { min-height: 34px; border-radius: 10px; }
+  .toolbar button:active:not(:disabled), .composer button:active:not(:disabled),
+  .modal button:active:not(:disabled) { transform: translateY(1px); }
+
+  .soundtrack-panel > summary,
+  .talking-panel > summary { background: var(--bg-subtle); border-style: solid;
+    border-color: var(--border); }
+  .soundtrack-panel > summary:hover,
+  .talking-panel > summary:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .soundtrack-panel > summary:hover .st-summary-main,
+  .soundtrack-panel > summary:hover .st-summary-sub,
+  .talking-panel > summary:hover .st-summary-main,
+  .talking-panel > summary:hover .st-summary-sub { color: var(--text); }
+  .soundtrack-panel > summary:hover::after,
+  .talking-panel > summary:hover::after { color: var(--accent); }
+
   @media (max-width: 700px) {
     .sidebar,
     .text-pane { display: none; }
@@ -1221,7 +1245,7 @@
     <div class="toolbar-section">
       <span class="sec-label" data-i18n="toolbar.template">Template</span>
       <button class="pick-btn empty" id="btn-pick-template" disabled>
-        <span class="label">— choose —</span><span class="arrow">▾</span>
+      <span class="label">— 选择模板 —</span><span class="arrow">▾</span>
       </button>
     </div>
 
@@ -1257,7 +1281,7 @@
       </a>
     </div>
 
-    <button class="icon-btn-toolbar" id="btn-settings" title="Settings" aria-label="Settings">
+    <button class="icon-btn-toolbar" id="btn-settings" data-i18n-attr="title:toolbar.settings,aria-label:toolbar.settings" title="设置" aria-label="设置">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
 
@@ -1268,17 +1292,17 @@
   <div class="body" id="body">
     <aside class="sidebar">
       <div class="sidebar-head">
-        <h2>Projects</h2>
-        <button class="new-project" id="btn-new">+ New</button>
-        <button class="sidebar-toggle" id="btn-sidebar-toggle" title="Collapse sidebar">‹</button>
+        <h2 data-i18n="sidebar.projects">项目</h2>
+        <button class="new-project" id="btn-new" data-i18n="sidebar.new">+ 新建</button>
+        <button class="sidebar-toggle" id="btn-sidebar-toggle" data-i18n-attr="title:sidebar.collapse,aria-label:sidebar.collapse" title="收起侧栏" aria-label="收起侧栏">‹</button>
       </div>
       <div class="project-list" id="project-list"></div>
     </aside>
     <div class="empty-state">
       <div>
         <div class="ico">🎬</div>
-        <h2>Pick or create a project</h2>
-        <p>Each project = one HTML video. Choose a template to see the visual baseline, chat with your agent to drive the content, edit per-frame text in the middle column, see the result on the right.</p>
+        <h2 data-i18n="app.empty_pick_create">挑一个项目或新建</h2>
+        <p data-i18n="app.empty_subtitle">每个项目对应一个 HTML 视频。选择模板、描述内容并逐帧调整，右侧实时查看结果。</p>
       </div>
     </div>
   </div>
@@ -1354,7 +1378,7 @@
     <div class="tpl-preview-head">
       <div class="name" id="tpl-preview-name">—</div>
       <div class="desc" id="tpl-preview-desc"></div>
-      <button class="modal-close" id="tpl-preview-close" aria-label="Close">✕</button>
+      <button class="modal-close" id="tpl-preview-close" data-i18n-attr="aria-label:tpl_preview.cancel" aria-label="取消">✕</button>
     </div>
     <div class="tpl-preview-stage">
       <div class="tpl-preview-frame" id="tpl-preview-frame">
@@ -1382,7 +1406,7 @@
   <div class="modal settings">
     <div class="settings-head">
       <h2 data-i18n="settings.title">Settings</h2>
-      <button class="modal-close" id="settings-close" aria-label="Close">✕</button>
+      <button class="modal-close" id="settings-close" data-i18n-attr="aria-label:settings.close" aria-label="关闭">✕</button>
     </div>
     <div class="settings-body">
       <nav class="settings-nav">
@@ -1408,6 +1432,6 @@
   </div>
 </div>
 
-<script type="module" src="/app.js?v=0.14-auto-template"></script>
+<script type="module" src="/app.js?v=0.15-zh-default"></script>
 </body>
 </html>

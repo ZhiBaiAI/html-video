@@ -9,20 +9,28 @@
  * Locale resolution order:
  *   1. localStorage hv.studio.locale
  *   2. navigator.language prefix ("zh-CN" → "zh")
- *   3. DEFAULT_LOCALE = "en"
+ *   3. DEFAULT_LOCALE = "zh"
  *
  * Strings missing in the active locale fall back to en, then the key.
  */
 
-export const DEFAULT_LOCALE = 'en';
+export const DEFAULT_LOCALE = 'zh';
 export const AVAILABLE_LOCALES = ['en', 'zh'];
 
 const DICT = {
   en: {
+    'app.title': 'html-video · Studio',
     'app.empty_pick_create': 'Pick or create a project',
     'app.empty_subtitle':
       'Each project = one HTML video. Choose a template to see the visual baseline, chat with your agent to drive the content, edit per-frame text in the middle column, see the result on the right.',
     'app.no_project': 'no project',
+    'project.no_template': 'no template',
+    'project.template': 'template',
+    'project.status.draft': 'draft',
+    'project.status.previewed': 'previewed',
+    'project.status.rendered': 'rendered',
+    'project.status.exporting': 'exporting',
+    'project.status.error': 'error',
 
     'sidebar.projects': 'Projects',
     'sidebar.new': '+ New',
@@ -30,6 +38,7 @@ const DICT = {
     'sidebar.empty_list': 'no projects yet',
     'sidebar.menu.rename': '✎ Rename',
     'sidebar.menu.delete': '🗑 Delete',
+    'sidebar.menu.more': 'More actions',
     'sidebar.rename_prompt': 'New project name',
     'sidebar.delete_confirm': 'Delete "{name}"? This cannot be undone.',
 
@@ -60,6 +69,9 @@ const DICT = {
     'chat.empty.title': 'Send a message to start',
     'chat.empty.body':
       'Tell the agent what you want — a single brand card, a multi-frame teaser, a data poster — and it will scaffold the HTML.',
+    'chat.empty.example_1': 'Warm-grain magazine outro: Open Design — design that evolves itself',
+    'chat.empty.example_2': 'Cyberpunk glitch title saying SYSTEM ONLINE, neon cyan/magenta',
+    'chat.empty.example_3': 'Swiss-grid data card: Templates 231, Skills 15, Systems 150, Craft 11',
     'chat.no_agent.title': 'Choose an agent first',
     'chat.no_agent.body':
       'Chat generation needs a local CLI agent or a configured API key. Templates and existing previews still work; generation starts after an agent is ready.',
@@ -236,6 +248,7 @@ const DICT = {
     'language.label': 'Language',
 
     'settings.title': 'Settings',
+    'settings.close': 'Close settings',
     'settings.tab.agent': 'Agent',
     'settings.tab.audio': 'Audio',
     'settings.tab.language': 'Language',
@@ -316,6 +329,7 @@ const DICT = {
     'settings.agent.byok.env_key': 'ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN',
     'settings.agent.byok.env_base': 'ANTHROPIC_BASE_URL (optional, defaults to api.anthropic.com)',
     'settings.agent.rescan': '↻ Rescan',
+    'settings.agent.install': 'Install ↗',
     'settings.agent.rescanned': 'Rescanned',
 
     'settings.language.title': 'Language',
@@ -376,10 +390,18 @@ const DICT = {
   },
 
   zh: {
+    'app.title': 'html-video · 视频工作台',
     'app.empty_pick_create': '挑一个项目或新建',
     'app.empty_subtitle':
       '每个项目 = 一个 HTML 视频。挑一个模板看视觉基线、跟 agent 聊驱动内容、在中间栏改逐帧文字、右边看效果。',
     'app.no_project': '未选项目',
+    'project.no_template': '未选择模板',
+    'project.template': '模板',
+    'project.status.draft': '草稿',
+    'project.status.previewed': '已预览',
+    'project.status.rendered': '已导出',
+    'project.status.exporting': '导出中',
+    'project.status.error': '异常',
 
     'sidebar.projects': '项目',
     'sidebar.new': '+ 新建',
@@ -387,6 +409,7 @@ const DICT = {
     'sidebar.empty_list': '还没有项目',
     'sidebar.menu.rename': '✎ 重命名',
     'sidebar.menu.delete': '🗑 删除',
+    'sidebar.menu.more': '更多操作',
     'sidebar.rename_prompt': '新项目名',
     'sidebar.delete_confirm': '删除 "{name}"？此操作不可撤销。',
 
@@ -415,6 +438,9 @@ const DICT = {
     'chat.empty.title': '发条消息开始',
     'chat.empty.body':
       '告诉 agent 想做什么 — 单帧标题卡、多帧预告片、数据大字报 — 它会搭出 HTML。',
+    'chat.empty.example_1': '暖颗粒杂志风片尾：Open Design，让设计持续进化',
+    'chat.empty.example_2': '赛博朋克故障标题：系统已上线，青色与品红霓虹',
+    'chat.empty.example_3': '瑞士网格数据卡：模板 231、技能 15、系统 150、作品 11',
     'chat.no_agent.title': '先选择一个 agent',
     'chat.no_agent.body':
       '生成需要本地 CLI agent，或配置 API key。模板和已有预览仍可查看；agent 就绪后才能开始生成。',
@@ -590,6 +616,7 @@ const DICT = {
     'language.label': '语言',
 
     'settings.title': '设置',
+    'settings.close': '关闭设置',
     'settings.tab.agent': 'Agent',
     'settings.tab.audio': '音频',
     'settings.tab.language': '界面语言',
@@ -670,6 +697,7 @@ const DICT = {
     'settings.agent.byok.env_key': 'ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN',
     'settings.agent.byok.env_base': 'ANTHROPIC_BASE_URL（可选，默认 api.anthropic.com）',
     'settings.agent.rescan': '↻ 重新扫描',
+    'settings.agent.install': '安装 ↗',
     'settings.agent.rescanned': '已重新扫描',
 
     'settings.language.title': '界面语言',
@@ -731,16 +759,19 @@ const DICT = {
 };
 
 const STORAGE_KEY = 'hv.studio.locale';
+const EXPLICIT_STORAGE_KEY = 'hv.studio.locale.explicit';
 let _locale = resolveInitialLocale();
 
 function resolveInitialLocale() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && AVAILABLE_LOCALES.includes(stored)) return stored;
+    const explicitlyChosen = localStorage.getItem(EXPLICIT_STORAGE_KEY) === '1';
+    if (explicitlyChosen && stored && AVAILABLE_LOCALES.includes(stored)) return stored;
   } catch {
     /* localStorage unavailable */
   }
-  // Default is English regardless of nav.language. Joey explicitly asked.
+  // Chinese is the product default. A language explicitly selected in
+  // Settings still wins on future visits.
   return DEFAULT_LOCALE;
 }
 
@@ -751,7 +782,10 @@ export function getLocale() {
 export function setLocale(loc) {
   if (!AVAILABLE_LOCALES.includes(loc)) return;
   _locale = loc;
-  try { localStorage.setItem(STORAGE_KEY, loc); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, loc);
+    localStorage.setItem(EXPLICIT_STORAGE_KEY, '1');
+  } catch {}
   // Notify listeners (the studio app re-renders).
   document.dispatchEvent(new CustomEvent('hv-locale-change', { detail: { locale: loc } }));
 }
@@ -766,6 +800,8 @@ export function setLocale(loc) {
  */
 export function applyDomI18n(root) {
   const r = root || document;
+  document.documentElement.lang = _locale === 'zh' ? 'zh-CN' : 'en';
+  document.title = t('app.title');
   r.querySelectorAll('[data-i18n]').forEach((el) => {
     el.textContent = t(el.dataset.i18n);
   });
@@ -793,7 +829,7 @@ export function t(key, params) {
   let s = dict[key];
   if (s === undefined) {
     // Fall back to English, then to the key itself.
-    s = DICT[DEFAULT_LOCALE][key] ?? key;
+    s = DICT.en[key] ?? key;
   }
   if (params) {
     for (const [k, v] of Object.entries(params)) {

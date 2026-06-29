@@ -1,6 +1,6 @@
 // html-video studio v0.4 — chat-driven HTML + template gallery + text-node editor
 
-import { t, getLocale, setLocale, AVAILABLE_LOCALES } from './i18n.js';
+import { t, getLocale, setLocale, AVAILABLE_LOCALES } from './i18n.js?v=0.15-zh-default';
 
 const DEFAULT_CLONE_AUDIO_URL = [
   'https://bailian-bmp-prod.oss-cn-beijing.aliyuncs.com/model_offline_result/11751412/1781175777482/qianwen/recording_1781175775568.wav',
@@ -12,12 +12,12 @@ const DEFAULT_CLONE_AUDIO_URL = [
 
 // Re-render whole UI on language change.
 document.addEventListener('hv-locale-change', () => {
-  document.documentElement.lang = getLocale();
+  document.documentElement.lang = getLocale() === 'zh' ? 'zh-CN' : 'en';
   if (typeof renderToolbar === 'function') renderToolbar();
   if (typeof renderMain === 'function') renderMain();
   if (typeof renderSidebar === 'function') renderSidebar();
 });
-document.documentElement.lang = getLocale();
+document.documentElement.lang = getLocale() === 'zh' ? 'zh-CN' : 'en';
 
 // Narration voices — Bailian CosyVoice v3 flash built-in voice ids.
 // `key` maps to a localized label (soundtrack.voice_<key>).
@@ -232,6 +232,12 @@ function syncNarrationVoiceSelect() {
 function defaultProjectName(seed) {
   const n = (state.projects?.length ?? 0) + (seed ?? 0) + 1;
   return `Untitled ${String(n).padStart(2, '0')}`;
+}
+
+function projectStatusLabel(status) {
+  const key = `project.status.${status || 'draft'}`;
+  const translated = t(key);
+  return translated === key ? String(status || '') : translated;
 }
 
 /**
@@ -539,8 +545,8 @@ function renderSidebar() {
     div.className = 'project-row' + (p.id === state.selectedId ? ' active' : '');
     div.innerHTML = `
       <div class="name">${esc(p.name)}</div>
-      <div class="meta">${p.template_id ? esc(p.template_id) : 'no template'} · ${p.status}</div>
-      <button class="row-menu-btn" title="More" data-pid="${esc(p.id)}">⋯</button>
+      <div class="meta">${p.template_id ? esc(p.template_id) : esc(t('project.no_template'))} · ${esc(projectStatusLabel(p.status))}</div>
+      <button class="row-menu-btn" title="${esc(t('sidebar.menu.more'))}" aria-label="${esc(t('sidebar.menu.more'))}" data-pid="${esc(p.id)}">⋯</button>
     `;
     div.onclick = (e) => {
       // Ignore clicks that started inside the menu button.
@@ -1632,9 +1638,11 @@ function renderFooter() {
   const fs = document.getElementById('footer-status');
   if (!fs) return;
   if (p) {
-    fs.innerHTML = `<b>${esc(p.name)}</b> · ${p.templateId ? `template <b>${esc(p.templateId)}</b>` : '<i>no template</i>'} · ${p.status}`;
+    fs.innerHTML = `<b>${esc(p.name)}</b> · ${p.templateId
+      ? `${esc(t('project.template'))} <b>${esc(p.templateId)}</b>`
+      : `<i>${esc(t('project.no_template'))}</i>`} · ${esc(projectStatusLabel(p.status))}`;
   } else {
-    fs.textContent = 'no project';
+    fs.textContent = t('app.no_project');
   }
 }
 
@@ -1660,9 +1668,9 @@ function renderChatLog() {
       <div style="font-weight:500;margin-bottom:6px;">${t('chat.empty.title')}</div>
       ${t('chat.empty.body')}
       <div class="examples">
-        <b>"Warm-grain magazine outro: Open Design — design that evolves itself"</b>
-        <b>"Cyberpunk glitch title saying SYSTEM ONLINE, neon cyan/magenta"</b>
-        <b>"Swiss-grid data card: Templates 231, Skills 15, Systems 150, Craft 11"</b>
+        <b>“${esc(t('chat.empty.example_1'))}”</b>
+        <b>“${esc(t('chat.empty.example_2'))}”</b>
+        <b>“${esc(t('chat.empty.example_3'))}”</b>
       </div>
     </div></div>`;
     return;
@@ -3961,7 +3969,7 @@ function renderSettingsAgent(panel) {
               ? (isCurrent
                   ? `<span style="font-size:11px;color:var(--accent);font-family:var(--font-mono)">${esc(t('settings.agent.in_use'))}</span>`
                   : `<button data-act="use" class="primary-action" style="background:var(--accent);border-color:var(--accent);color:var(--accent-fg)">${esc(t('settings.agent.use'))}</button>`)
-              : (a.installUrl ? `<a href="${a.installUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-faint)">install ↗</a>` : '')}
+              : (a.installUrl ? `<a href="${a.installUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-faint)">${esc(t('settings.agent.install'))}</a>` : '')}
           </div>
           <div class="agent-test-result" data-test-result="${esc(a.id)}" style="display:none;grid-column:1 / -1"></div>
         </div>`;
