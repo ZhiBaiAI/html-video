@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-product-promo
 name: Product Promo
+name_zh: "产品宣传"
+description_zh: "多卖点产品展示，适合功能介绍和主宣传片。"
 description: >
   Multi-scene product showcase with SVG assets
 

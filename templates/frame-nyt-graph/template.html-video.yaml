@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-nyt-graph
 name: NYT Graph
+name_zh: "纽约时报折线图"
+description_zh: "新闻编辑感数据揭示，适合趋势和关键指标。"
 description: >
   Animated data chart in print editorial style
 

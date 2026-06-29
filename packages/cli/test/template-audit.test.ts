@@ -6,7 +6,9 @@ import { analyzeTemplateSource } from '../dist/commands/template-audit.js';
 const template = {
   id: 'frame-test',
   name: 'Test',
+  name_zh: '测试模板',
   description: 'Animated metric bar chart',
+  description_zh: '动态指标柱状图',
   engine: 'hyperframes',
   category: 'data-viz',
   tags: ['metric', 'bar'],

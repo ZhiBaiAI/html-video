@@ -105,7 +105,7 @@ body {
 
 .kicker {
   margin: 0 0 7px;
-  color: var(--gutter-fg);
+  color: rgba(255, 255, 255, 0.72);
   font-size: 15px;
   font-weight: 650;
   text-transform: uppercase;
@@ -116,7 +116,7 @@ body {
 
 .title {
   margin: 0;
-  color: var(--editor-fg);
+  color: #f7f7f5;
   font-size: 44px;
   line-height: 1;
   font-weight: 760;
@@ -124,7 +124,7 @@ body {
 
 .source-note {
   width: 510px;
-  color: var(--gutter-fg);
+  color: rgba(255, 255, 255, 0.72);
   font-size: 16px;
   line-height: 1.35;
   text-align: right;

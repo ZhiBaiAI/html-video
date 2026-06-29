@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-play-mode
 name: Play Mode
+name_zh: "玩乐模式"
+description_zh: "轻松活泼的社媒广告感，适合消费产品和趣味开场。"
 description: >
   Playful elastic animations
 

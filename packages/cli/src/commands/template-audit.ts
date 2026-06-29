@@ -1,5 +1,6 @@
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { dirname, extname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { TemplateMetadata } from '@html-video/core';
 import type { CliContext } from '../context.js';
 import { fail, ok } from '../output.js';
@@ -55,8 +56,10 @@ export async function collectTemplateAudit(templates: TemplateMetadata[]): Promi
   ) as Record<CoverageKey, string[]>;
 
   for (const template of templates) {
-    const source = await readTemplateSource(template);
-    const item = analyzeTemplateSource(template, source);
+    const bundle = await readTemplateSource(template);
+    const item = analyzeTemplateSource(template, bundle.source);
+    item.errors.push(...bundle.errors);
+    item.warnings.push(...bundle.warnings);
     items.push(item);
     for (const capability of item.capabilities) coverage[capability].push(template.id);
   }
@@ -99,6 +102,10 @@ export function analyzeTemplateSource(template: TemplateMetadata, source: string
           : 'none';
   const errors: string[] = [];
   const warnings: string[] = [];
+  if (!template.name_zh?.trim()) errors.push('name_zh is required for the Chinese-first Studio');
+  if (!template.description_zh?.trim() && !/[\u3400-\u9fff]/u.test(template.description)) {
+    errors.push('description_zh is required when the primary description is not Chinese');
+  }
   if (motion === 'none') errors.push('source entry has no load-triggered motion');
   if (/\b(?:Math\.random|Date\.now|crypto\.randomUUID)\s*\(/.test(source)) {
     errors.push('source contains nondeterministic time/random input');
@@ -129,15 +136,62 @@ export function analyzeTemplateSource(template: TemplateMetadata, source: string
   return { id: template.id, engine: template.engine, motion, capabilities, errors, warnings };
 }
 
-async function readTemplateSource(template: TemplateMetadata): Promise<string> {
-  if (!template.__dir) return '';
+async function readTemplateSource(
+  template: TemplateMetadata,
+): Promise<{ source: string; errors: string[]; warnings: string[] }> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!template.__dir) return { source: '', errors: ['template directory is unavailable'], warnings };
   const entry = join(template.__dir, template.source_entry);
-  const files = template.native
-    ? await sourceFilesBelow(dirname(entry))
-    : [entry];
+  if (!existsSync(entry)) return { source: '', errors: [`source entry missing: ${template.source_entry}`], warnings };
+  const poster = resolve(template.__dir, template.preview.poster);
+  if (!isPathInside(template.__dir, poster) || !existsSync(poster)) {
+    errors.push(`preview poster missing: ${template.preview.poster}`);
+  } else if ((await stat(poster)).size === 0) {
+    errors.push(`preview poster is empty: ${template.preview.poster}`);
+  }
+
+  const entrySource = await readFile(entry, 'utf8');
+  const files = template.native ? await sourceFilesBelow(dirname(entry)) : [entry];
   const chunks: string[] = [];
   for (const file of files) chunks.push(await readFile(file, 'utf8'));
-  return chunks.join('\n');
+
+  if (!template.native && extname(entry).toLowerCase() === '.html') {
+    const refs = [...new Set(Array.from(entrySource.matchAll(/data-composition-src=["']([^"']+)["']/gi))
+      .map((match) => match[1] ?? '')
+      .filter(Boolean))];
+    for (const ref of refs) {
+      const compositionPath = resolve(dirname(entry), ref);
+      if (!isPathInside(template.__dir, compositionPath)) {
+        errors.push(`composition escapes template directory: ${ref}`);
+        continue;
+      }
+      if (!existsSync(compositionPath)) {
+        errors.push(`composition missing: ${ref}`);
+        continue;
+      }
+      const composition = await readFile(compositionPath, 'utf8');
+      chunks.push(composition);
+      if (!/<template\b/i.test(composition)) errors.push(`sub-composition must use <template>: ${ref}`);
+      if (!/data-composition-id=["'][^"']+["']/i.test(composition)) errors.push(`composition id missing: ${ref}`);
+      if (!/data-width=["']\d+["']/i.test(composition) || !/data-height=["']\d+["']/i.test(composition)) {
+        errors.push(`composition dimensions missing: ${ref}`);
+      }
+      if (/gsap\.timeline/i.test(composition) && !/window\.__timelines/i.test(composition)) {
+        errors.push(`GSAP timeline is not registered: ${ref}`);
+      }
+    }
+  }
+  const inputProperties = (template.inputs.schema as { properties?: Record<string, unknown> })?.properties;
+  if (inputProperties && Object.keys(inputProperties).length > 0 && (template.inputs.examples?.length ?? 0) === 0) {
+    warnings.push('template declares input properties but has no input example');
+  }
+  return { source: chunks.join('\n'), errors, warnings };
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const rel = relative(resolve(root), resolve(candidate));
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
 async function sourceFilesBelow(root: string): Promise<string[]> {

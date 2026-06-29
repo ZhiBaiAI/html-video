@@ -1,6 +1,8 @@
 spec_version: 1
 id: vfx-text-cursor
 name: Text + Cursor VFX
+name_zh: "文字光标特效"
+description_zh: "文本与光标 VFX，适合代码演示和终端气质开场。"
 description: >
   Typewriter text effect with blinking terminal cursor — perfect for code-style reveals or tech demos.
 

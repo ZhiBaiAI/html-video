@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-electric-studio
 name: Electric Studio
+name_zh: "电蓝工作室"
+description_zh: "黑白蓝高对比分屏引语卡，适合使命宣言和客户证言。"
 description: >
   Two-panel vertical split with a quote as the hero — white top and electric-blue bottom
   panels open from the center, a black accent bar grows on the seam, and the quote reveals

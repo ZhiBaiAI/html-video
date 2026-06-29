@@ -30,37 +30,9 @@ const NARRATION_VOICES = [
   { key: 'female_sweet',  voiceId: 'longpaopao_v3' },
 ];
 
-const TEMPLATE_ZH = {
-  'frame-bold-poster': { name: '强海报', desc: '杂志封面式强标题，适合宣言、观点和开场。' },
-  'frame-bold-signal': { name: '强信号', desc: '深色底上的高冲击章节卡，适合发布会和章节分隔。' },
-  'frame-build-minimal': { name: '奢华极简', desc: '大留白、细字重和金色发丝线，适合高端产品与品牌主视觉。' },
-  'frame-creative-voltage': { name: '创意电压', desc: '电蓝分屏和手写线条，适合创意活动和高能标题。' },
-  'frame-data-chart-nyt': { name: '纽约时报数据图', desc: '编辑部风格动态图表，适合数据报道和年度报告。' },
-  'frame-data-rollup': { name: '数据滚动', desc: 'Remotion 原生数字滚动和柱形动画，适合 KPI 数据帧。' },
-  'frame-decision-tree': { name: '决策树', desc: '分支流程图动画，适合教程、选择路径和流程说明。' },
-  'frame-electric-studio': { name: '电蓝工作室', desc: '黑白蓝高对比分屏引语卡，适合使命宣言和客户证言。' },
-  'frame-glitch-title': { name: '故障标题', desc: '赛博故障感标题揭示，适合技术、安全和黑客气质内容。' },
-  'frame-kinetic-type': { name: '动态文字', desc: '文字驱动的动效标题，适合短促有力的开场。' },
-  'frame-light-leak-cinema': { name: '漏光电影感', desc: '电影漏光和氛围开场，适合纪录片、情绪和冷启动。' },
-  'frame-liquid-bg-hero': { name: '液态背景主视觉', desc: '流体背景上的产品主视觉，适合 SaaS 和发布页视频。' },
-  'frame-logo-outro': { name: '品牌片尾', desc: 'Logo 收尾卡，适合视频结尾和频道签名。' },
-  'frame-motion-blur': { name: '运动模糊', desc: '速度分层与拖影展示，适合解释运动、速度和转场技术。' },
-  'frame-nyt-graph': { name: '纽约时报折线图', desc: '新闻编辑感数据揭示，适合趋势和关键指标。' },
-  'frame-pentagram-stat': { name: '五角星指标', desc: '理性高对比的单指标英雄帧，适合 benchmark 和数据亮点。' },
-  'frame-play-mode': { name: '玩乐模式', desc: '轻松活泼的社媒广告感，适合消费产品和趣味开场。' },
-  'frame-product-promo': { name: '产品宣传', desc: '多卖点产品展示，适合功能介绍和主宣传片。' },
-  'frame-product-promo-30s': { name: '30 秒产品宣传', desc: '完整 30 秒 SaaS 产品宣传节奏。' },
-  'frame-swiss-grid': { name: '瑞士网格', desc: '克制网格和排版主导，适合企业汇报和理性标题。' },
-  'frame-takram-organic': { name: '有机网络', desc: '温暖有机的系统/网络概念展示，适合产品故事和架构说明。' },
-  'frame-vignelli': { name: '维涅利红', desc: '红色强调和经典现代主义构图，适合竖版社媒声明。' },
-  'frame-vscode-theme-visualizer': { name: 'VS Code 主题展示', desc: '代码编辑器主题和打字动画展示，适合开发者工具。' },
-  'frame-warm-grain': { name: '暖颗粒', desc: '温暖颗粒感杂志开场，适合生活方式和产品发布。' },
-  'vfx-text-cursor': { name: '文字光标特效', desc: '文本与光标 VFX，适合代码演示和终端气质开场。' },
-};
-
 function templateDisplayName(tpl) {
   if (!tpl) return '';
-  const zh = tpl.name_zh || TEMPLATE_ZH[tpl.id]?.name;
+  const zh = tpl.name_zh;
   const en = tpl.name || tpl.id;
   if (!zh || en.includes(zh)) return en;
   return `${zh} · ${en}`;
@@ -68,7 +40,7 @@ function templateDisplayName(tpl) {
 
 function templateDescription(tpl) {
   if (!tpl) return '';
-  return tpl.description_zh || TEMPLATE_ZH[tpl.id]?.desc || tpl.description || '';
+  return tpl.description_zh || tpl.description || '';
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {

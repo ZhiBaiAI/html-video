@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-light-leak-cinema
 name: Light Leak Cinema
+name_zh: "漏光电影感"
+description_zh: "电影漏光和氛围开场，适合纪录片、情绪和冷启动。"
 description: >
   Cinematic light leak frame — film grain, lens flare, and editorial 35mm warmth over a hero shot.
 

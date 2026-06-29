@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-data-chart-nyt
 name: NYT Data Chart
+name_zh: "纽约时报数据图"
+description_zh: "编辑部风格动态图表，适合数据报道和年度报告。"
 description: >
   New York Times-style animated data chart with counter animation and editorial typography.
 

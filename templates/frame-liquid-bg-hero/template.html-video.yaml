@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-liquid-bg-hero
 name: Liquid Background Hero
+name_zh: "液态背景主视觉"
+description_zh: "流体背景上的产品主视觉，适合 SaaS 和发布页视频。"
 description: >
   Hero card over a flowing liquid mesh-gradient background — magazine-style cover with editorial typography.
 

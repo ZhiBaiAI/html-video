@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-glitch-title
 name: Glitch Title
+name_zh: "故障标题"
+description_zh: "赛博故障感标题揭示，适合技术、安全和黑客气质内容。"
 description: >
   Cyberpunk-style glitch title with RGB shift, scanline, and chromatic aberration effects.
 

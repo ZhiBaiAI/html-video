@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-creative-voltage
 name: Creative Voltage
+name_zh: "创意电压"
+description_zh: "电蓝分屏和手写线条，适合创意活动和高能标题。"
 description: >
   Electric-blue / dark offset split with a hand-drawn script accent — panels slide in
   offset, a display title rises with one electric outlined word, and a handwritten script

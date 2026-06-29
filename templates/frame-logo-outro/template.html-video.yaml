@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-logo-outro
 name: Logo Outro Frame
+name_zh: "品牌片尾"
+description_zh: "Logo 收尾卡，适合视频结尾和频道签名。"
 description: >
   Segmented logo assembly + glow bloom + tagline reveal — perfect for video outros and brand closing frames.
 

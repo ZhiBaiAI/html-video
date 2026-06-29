@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-vscode-theme-visualizer
 name: VS Code Theme Visualizer
+name_zh: "VS Code 主题展示"
+description_zh: "代码编辑器主题和打字动画展示，适合开发者工具。"
 description: >
   Faithful VS Code workbench recreation with per-character typing animation
   across built-in themes. Activity bar, sidebar, tabs, editor, terminal, and

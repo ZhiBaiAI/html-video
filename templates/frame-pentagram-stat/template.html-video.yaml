@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-pentagram-stat
 name: Pentagram Stat
+name_zh: "五角星指标"
+description_zh: "理性高对比的单指标英雄帧，适合 benchmark 和数据亮点。"
 description: >
   Swiss-grid statistic anchor — a giant number bleeds off the edge while grid rules
   sweep in, a bar chart grows, and a black data bar slides up. Rational, editorial,
