@@ -341,7 +341,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (!tmpl) return json(res, 400, { error: `Template ${project.templateId} not found.` });
 
         let agentId = project.agentId;
-        let detectedAgents = await detectAll();
+        const detectedAgents = await detectAll();
         if (!agentId) {
           const ready = detectedAgents.filter((a) => a.available && a.id !== 'amr');
           const apiReady = ready.find((a) => a.id === 'anthropic-api');
