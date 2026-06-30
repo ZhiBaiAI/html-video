@@ -89,7 +89,10 @@ const API = {
   putRawHtml: (id, html) => fetch(`/api/projects/${id}/raw-html`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ html }) }).then(r => r.json()),
   contentGraph: id => fetch(`/api/projects/${id}/content-graph`).then(r => r.ok ? r.json() : null),
   unenhanceFrame: (id, nodeId) => fetch(`/api/projects/${id}/frames/${encodeURIComponent(nodeId)}/unenhance`, { method: 'POST' }).then(r => r.json()),
-  testAgent: id => fetch(`/api/agents/${encodeURIComponent(id)}/test`, { method: 'POST' }).then(r => r.json()),
+  testAgent: (id, model) => fetch(`/api/agents/${encodeURIComponent(id)}/test`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...(model ? { model } : {}) }),
+  }).then(r => r.json()),
   rescanAgents: () => fetch('/api/agents?force=1').then(r => r.json()),
   narrationVoices: () => fetch('/api/config/narration/voices').then(r => r.json()),
   cloneNarrationVoiceFromUrl: b => fetch('/api/config/narration/voices/from-url', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(readApiResult),
@@ -4533,6 +4536,31 @@ function renderSettingsAgent(panel) {
   const currentId = state.selected?.agentId
     || (agents.find((a) => a.available)?.id ?? 'anthropic-api');
 
+  // Catalog-backed agents (currently AMR) load their real model list lazily.
+  // Custom-model CLIs do not need a catalog: the value is the exact id their
+  // own CLI accepts and is persisted on the current project.
+  state._agentModelCatalogs ??= {};
+  for (const agent of list) {
+    if (agent.available && agent.modelSelection?.mode === 'catalog' && !state._agentModelCatalogs[agent.id]) {
+      state._agentModelCatalogs[agent.id] = { loading: true, models: [] };
+      fetch(`/api/agents/${encodeURIComponent(agent.id)}/models`)
+        .then((r) => r.json())
+        .then((data) => {
+          state._agentModelCatalogs[agent.id] = {
+            loading: false,
+            models: data.models ?? [],
+            default: data.default ?? null,
+            error: data.error ?? null,
+          };
+          if (panel.isConnected) renderSettingsAgent(panel);
+        })
+        .catch((error) => {
+          state._agentModelCatalogs[agent.id] = { loading: false, models: [], error: error?.message ?? String(error) };
+          if (panel.isConnected) renderSettingsAgent(panel);
+        });
+    }
+  }
+
   panel.innerHTML = `
     <h3>${esc(t('settings.agent.title'))}</h3>
     <div class="panel-sub">${esc(t('settings.agent.subtitle'))}</div>
@@ -4564,6 +4592,8 @@ function renderSettingsAgent(panel) {
     <div class="agent-list">
       ${list.map((a) => {
         const isCurrent = a.id === currentId && a.available;
+        const currentModel = isCurrent ? (state.selected?.agentModel ?? '') : '';
+        const catalog = state._agentModelCatalogs[a.id];
         const desc = AGENT_DESC[a.id] || (a.bin ?? '');
         const ver = a.version ? esc(a.version) : (a.available ? '' : esc(t('settings.agent.unavailable')));
         const icon = agentIconHtml(a.id);
@@ -4584,6 +4614,26 @@ function renderSettingsAgent(panel) {
                   : `<button data-act="use" class="primary-action" style="background:var(--accent);border-color:var(--accent);color:var(--accent-fg)">${esc(t('settings.agent.use'))}</button>`)
               : (a.installUrl ? `<a href="${a.installUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-faint)">${esc(t('settings.agent.install'))}</a>` : '')}
           </div>
+          ${a.modelSelection ? `<div class="agent-model-config">
+            <div class="agent-model-copy">
+              <label>${esc(t('settings.agent.model_label'))}</label>
+              <span>${esc(a.modelSelection.mode === 'catalog'
+                ? t('settings.agent.model_catalog_hint')
+                : t('settings.agent.model_custom_hint'))}</span>
+            </div>
+            ${a.modelSelection.mode === 'catalog'
+              ? `<select data-model-control ${!a.available || catalog?.loading ? 'disabled' : ''}>
+                  ${catalog?.loading ? `<option>${esc(t('settings.agent.model_loading'))}</option>` : ''}
+                  ${(catalog?.models ?? []).map((model) => {
+                    const selected = model.id === (currentModel || catalog?.default) ? ' selected' : '';
+                    return `<option value="${esc(model.id)}"${selected}>${esc(model.label ?? model.id)}</option>`;
+                  }).join('')}
+                </select>`
+              : `<input data-model-control type="text" value="${esc(currentModel)}"
+                  placeholder="${esc(a.modelSelection.placeholder || t('settings.agent.model_default'))}"
+                  ${!a.available ? 'disabled' : ''} />`}
+            ${isCurrent ? `<button data-act="model-save" class="model-save">${esc(t('settings.agent.model_save'))}</button>` : ''}
+          </div>` : ''}
           <div class="agent-test-result" data-test-result="${esc(a.id)}" style="display:none;grid-column:1 / -1"></div>
         </div>`;
       }).join('')}
@@ -4615,15 +4665,22 @@ function renderSettingsAgent(panel) {
       const card = btn.closest('.agent-card');
       const aid = card.dataset.agentId;
       const act = btn.dataset.act;
+      const model = card.querySelector('[data-model-control]')?.value?.trim() || null;
       if (act === 'use') {
         if (!state.selected) {
           toast(t('composer.placeholder.no_project'), 'error');
           return;
         }
-        await API.setAgent(state.selected.id, aid);
+        await API.setAgent(state.selected.id, aid, model);
         state.selected = (await API.getProject(state.selected.id)).project;
         renderSettingsAgent(panel);
         toast(`✓ ${aid}`, 'success');
+      } else if (act === 'model-save') {
+        if (!state.selected || aid !== currentId) return;
+        await API.setAgent(state.selected.id, aid, model);
+        state.selected = (await API.getProject(state.selected.id)).project;
+        renderSettingsAgent(panel);
+        toast(model ? t('settings.agent.model_saved', { model }) : t('settings.agent.model_default_saved'), 'success');
       } else if (act === 'test') {
         const result = panel.querySelector(`[data-test-result="${aid}"]`);
         result.style.display = 'block';
@@ -4631,7 +4688,7 @@ function renderSettingsAgent(panel) {
         result.textContent = t('settings.agent.testing');
         btn.disabled = true;
         try {
-          const r = await API.testAgent(aid);
+          const r = await API.testAgent(aid, model);
           if (r.ok) {
             result.classList.add('ok');
             result.textContent = t('settings.agent.test_ok', { ms: r.ms, bytes: r.bytes })

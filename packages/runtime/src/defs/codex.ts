@@ -25,5 +25,6 @@ export const codex: AgentDef = {
   },
   streamFormat: 'plain',
   promptViaStdin: true,
+  modelSelection: { mode: 'custom', placeholder: 'gpt-5.4' },
   installUrl: 'https://developers.openai.com/codex/cli',
 };

@@ -1453,20 +1453,30 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return json(res, 200, { agents });
       }
 
-      // Agent models — currently AMR only. Lists the live `vela model list`
-      // catalog so the UI can offer a model picker (deepseek/claude/gpt/…).
+      // Agent models. AMR exposes a live catalog; CLI/API agents with a model
+      // override accept a validated free-form id which is passed to the real
+      // invocation instead of being a display-only preference.
       const modelsMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/models$/);
       if (modelsMatch && modelsMatch[1] && m === 'GET') {
         const agentId = modelsMatch[1];
-        if (agentId !== 'amr') return json(res, 200, { models: [] });
         const def = findAgent(agentId);
         if (!def) return json(res, 404, { error: `agent "${agentId}" not registered` });
+        if (!def.modelSelection) return json(res, 200, { models: [], configurable: false });
+        if (agentId !== 'amr') {
+          return json(res, 200, {
+            models: [],
+            configurable: true,
+            mode: def.modelSelection.mode,
+            placeholder: def.modelSelection.placeholder ?? null,
+            default: def.defaultModel ?? null,
+          });
+        }
         const { resolveBin, listAmrModels } = await import('@html-video/runtime');
         const bin = await resolveBin(def);
         if (!bin) return json(res, 400, { error: 'vela binary not found' });
         try {
           const models = await listAmrModels(bin);
-          return json(res, 200, { models, default: def.defaultModel ?? null });
+          return json(res, 200, { models, configurable: true, mode: 'catalog', default: def.defaultModel ?? null });
         } catch (err) {
           return json(res, 200, { models: [], error: err instanceof Error ? err.message : String(err) });
         }
@@ -1512,16 +1522,19 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         const agentId = testMatch[1];
         const def = findAgent(agentId);
         if (!def) return json(res, 404, { error: `agent "${agentId}" not registered` });
+        const body = (await readBody(req)) as { model?: string };
+        const model = body.model?.trim() || undefined;
         const prompt = 'Reply with one word: hello.';
         const t0 = Date.now();
         try {
-          const out = await callAgentSimple(def, prompt, process.cwd(), undefined, 45_000);
+          const out = await callAgentSimple(def, prompt, process.cwd(), model, 45_000);
           return json(res, 200, {
             ok: true,
             exit_code: 0,
             ms: Date.now() - t0,
             bytes: out.length,
             stdout_head: out.slice(0, 200),
+            model: model ?? def.defaultModel ?? null,
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

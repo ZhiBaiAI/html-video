@@ -190,6 +190,21 @@
     border: 1px solid var(--border); padding: 5px 10px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 11.5px; transition: border-color .12s, color .12s; }
   .agent-card .agent-actions button:hover { border-color: var(--accent); color: var(--text); }
+  .agent-card .agent-model-config { grid-column: 2 / -1; display: grid;
+    grid-template-columns: minmax(150px, .9fr) minmax(220px, 1.2fr) auto;
+    gap: 10px; align-items: center; padding-top: 10px; border-top: 1px solid var(--border); }
+  .agent-card .agent-model-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .agent-card .agent-model-copy label { font-size: 11.5px; font-weight: 600; color: var(--text); }
+  .agent-card .agent-model-copy span { font-size: 10.5px; line-height: 1.35; color: var(--text-muted); }
+  .agent-card .agent-model-config input,
+  .agent-card .agent-model-config select { min-width: 0; width: 100%; background: var(--bg);
+    border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm);
+    padding: 7px 9px; font: 11.5px var(--font-mono); }
+  .agent-card .agent-model-config input:focus,
+  .agent-card .agent-model-config select:focus { outline: none; border-color: var(--accent); }
+  .agent-card .agent-model-config .model-save { background: var(--accent-soft); color: var(--accent);
+    border: 1px solid var(--accent); padding: 7px 10px; border-radius: var(--radius-sm);
+    cursor: pointer; font-size: 11px; white-space: nowrap; }
   .agent-card .agent-status-dot { display: inline-block; width: 6px; height: 6px;
     border-radius: 50%; margin-right: 4px; }
   .agent-card .agent-status-dot.ok { background: var(--green, #4ade80); }
@@ -199,6 +214,10 @@
     background: var(--bg-subtle); border-radius: var(--radius-sm); }
   .settings-panel .agent-test-result.ok { color: var(--green, #4ade80); }
   .settings-panel .agent-test-result.error { color: rgb(220, 60, 60); }
+  @media (max-width: 760px) {
+    .agent-card .agent-model-config { grid-column: 1 / -1; grid-template-columns: 1fr; }
+    .agent-card .agent-model-config .model-save { justify-self: start; }
+  }
   .audio-config { display: flex; flex-direction: column; gap: 14px; margin-top: 8px; }
   .audio-status { font-size: 12.5px; color: var(--text-muted); display: flex;
     align-items: center; gap: 8px; }

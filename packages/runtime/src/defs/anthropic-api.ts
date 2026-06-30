@@ -40,6 +40,7 @@ export const anthropicApi: AgentDef = {
   bin: 'anthropic-api',
   versionArgs: [],
   buildArgs: () => [],
+  modelSelection: { mode: 'custom', placeholder: 'claude-sonnet-4-6 or a compatible model ID' },
   streamFormat: 'plain',
   kind: 'http',
   installUrl: 'https://docs.claude.com/en/api/getting-started',
@@ -58,7 +59,7 @@ export const anthropicApi: AgentDef = {
     };
   },
 
-  async httpHandler(prompt, _ctx, onEvent, signal) {
+  async httpHandler(prompt, ctx, onEvent, signal) {
     const auth = resolveAuth();
     if (!auth) {
       onEvent({ type: 'error', message: 'No ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN in env' });
@@ -83,7 +84,7 @@ export const anthropicApi: AgentDef = {
         headers,
         signal,
         body: JSON.stringify({
-          model: auth.model,
+          model: ctx.model || auth.model,
           max_tokens: 16000,
           stream: true,
           messages: [{ role: 'user', content: prompt }],

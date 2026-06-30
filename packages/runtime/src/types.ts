@@ -50,6 +50,12 @@ export interface AgentDef {
    * session/prompt (AMR rejects a missing model). The ACP client sends this via
    * set_model when the caller doesn't specify one. */
   defaultModel?: string;
+  /** How Studio should expose model selection for this agent. The runtime must
+   * also consume AgentInvokeContext.model; this metadata is never UI-only. */
+  modelSelection?: {
+    mode: 'catalog' | 'custom';
+    placeholder?: string;
+  };
   /** Extra fixed env vars on spawn */
   env?: Record<string, string>;
   /** Where to find install instructions */
@@ -98,6 +104,7 @@ export interface DetectedAgent {
   installUrl?: string;
   /** Why it's unavailable / what to do — e.g. AMR found but not logged in. */
   hint?: string;
+  modelSelection?: AgentDef['modelSelection'];
 }
 
 export type AgentEvent =

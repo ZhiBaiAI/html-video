@@ -101,6 +101,7 @@ export const amr: AgentDef = {
   // AMR rejects session/prompt until a model is set. Default to deepseek-v4-flash
   // (the "Lower cost / Many models" official pick); overridable per-call later.
   defaultModel: 'deepseek-v4-flash',
+  modelSelection: { mode: 'catalog' },
 
   // Found on disk → confirm the user is actually logged in. AMR needs no API
   // key, but it does need a live `vela login` session.
