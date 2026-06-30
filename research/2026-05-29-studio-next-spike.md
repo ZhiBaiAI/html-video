@@ -1,5 +1,8 @@
 # Spike report — hyperframes/studio integration (2026-05-29)
 
+> Archived conclusion: the disposable `packages/studio-next` implementation was removed
+> from the production workspace after this spike. This report preserves the findings.
+
 Verdict: **plan A (rebuild html-video studio on top of hf NLELayout) costs
 several weeks, not one. Pivot to plan B — keep the current vanilla studio,
 borrow the small leaf components.**
@@ -80,10 +83,9 @@ Both choices wreck the v0.8 phase-driven flow.
 3. **Click-to-edit text overlay stays our hand-rolled one** (commit
    `e17af19` / `5046fa5`). It already works without postMessage and
    without hf runtime.
-4. **`packages/studio-next` becomes a permanent home** for any React-only
-   borrowable hf widget (EaseCurveEditor etc), exposed back into the
-   vanilla studio via an `<iframe>` portal or a tiny standalone bundle.
-   No need to React-migrate the main app.
+4. **Keep React-only experiments outside the production workspace.** If a
+   borrowable hf widget becomes necessary, prototype it under `research/` and
+   promote only the smallest production bundle into `project-studio`.
 5. **If we ever want NLE-style editing**, the path is to ship our own
    timeline UI on top of our existing frames[] model — not to reshape our
    model to fit hf's.

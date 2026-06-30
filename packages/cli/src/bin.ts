@@ -22,7 +22,6 @@ import {
 import { startStudioServer } from './studio-server.js';
 
 // cac is a CJS default export; ESM interop sometimes wraps it in `.default`
-// biome-ignore lint/suspicious/noExplicitAny: cac's types don't expose this shape
 const cacFn: (name: string) => any =
   typeof cacModule === 'function' ? (cacModule as any) : (cacModule as any).default;
 const cli = cacFn('html-video');

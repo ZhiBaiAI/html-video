@@ -2,7 +2,7 @@
 
 > Source: yabohe (公众号 yablog), 2026-05-27
 > URL: https://mp.weixin.qq.com/s/fVb8VNWpevh9vQP4tPrbPw
-> Local copy: `research/refs/mp.weixin.qq.com/hyperframes-mmbiz-qpic-cn-sz_mmbiz_png-xw7as806wyt/`
+> Local extracted Markdown: `research/refs/mp.weixin.qq.com/hyperframes-mmbiz-qpic-cn-sz_mmbiz_png-xw7as806wyt/hyperframes-mmbiz-qpic-cn-sz_mmbiz_png-xw7as806wyt.md` (the 3.6 MB raw browser capture was intentionally removed after extraction)
 
 ## 文章内容速记
 

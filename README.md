@@ -61,7 +61,7 @@ Every template below is a real, animated single-file HTML video — these are li
 </tr>
 </table>
 
-…and 31 more, including multi-scene product promos, kinetic type, Swiss-grid and Vignelli data cards, decision-tree explainers, Takram-organic motion, warm-grain editorial, and Remotion-native data rollups. Browse all 37 live in the studio gallery.
+…and 31 more, including multi-scene product promos, kinetic type, Swiss-grid and Vignelli data cards, decision-tree explainers, Takram-organic motion, warm-grain editorial, and Remotion-native data rollups. Browse all 38 as static frame samples in the studio gallery.
 
 ---
 
@@ -93,7 +93,7 @@ The same idea powers [Open Design](https://github.com/nexu-io/open-design) in th
 | **Coding agents (14)** | Open Design (Vela) · Windsurf CLI · Trae CLI · Claude Code · Cursor Agent · Codex CLI · Gemini CLI · Grok Build · Qwen Code · OpenCode · GitHub Copilot CLI · Aider · Hermes · Anthropic Messages API — auto-detected on your `PATH`, switchable from the top bar. |
 | **Real MP4 render** | Headless Chromium records the animated HTML and ffmpeg encodes it (libx264) — locally, no cloud render, no per-clip fee. |
 | **Article / repo → video** | Paste a URL or GitHub repo; the studio fetches it server-side (handles WeChat 公众号 articles) and builds the video from the real content. |
-| **37 templates** | Curated, license-clean patterns: data viz, product promos, social shorts, explainers, kinetic type, transitions — previewed live in the gallery. |
+| **38 templates** | Curated, license-clean patterns: data viz, product promos, social shorts, explainers, kinetic type, transitions — previewed as static frame samples in the gallery. |
 | **Multi-frame storyboards** | A content-graph drives multi-scene videos; edit per-frame text inline, enhance data frames with Remotion, re-render. |
 | **AI narration** | Optional generated narration, mixed into the MP4 at export. |
 | **Talking-head source** | Upload a speaker video, transcribe it with local Whisper, and export with the speaker overlaid bottom-right using the source audio. |
@@ -234,7 +234,7 @@ Narration is mixed into the exported MP4 via ffmpeg. If talking-head mode is ena
 
 ## Template gallery
 
-The 37 templates aren't a random grab-bag — each one is a self-contained, agent-readable unit described by a `template.html-video.yaml` manifest the studio scans at startup. A manifest carries everything the agent needs to pick and drive the template without opening the HTML:
+The 38 templates aren't a random grab-bag — each one is a self-contained, agent-readable unit described by a `template.html-video.yaml` manifest the studio scans at startup. A manifest carries everything the agent needs to pick and drive the template without opening the HTML:
 
 - **What it's for** — `category`, `tags`, and a `best_for` list (e.g. *"Corporate slide"*, *"Minimal report card"*) that `search-templates` matches your intent against.
 - **What it outputs** — supported resolutions, aspect ratios, fps, duration bounds, whether it has an alpha channel or audio.
@@ -250,7 +250,7 @@ That last part is deliberate. Every template is **license-clean by construction*
 ```
 packages/
 ├── core/                  Project / Asset / ContentGraph types, registries, orchestrator,
-│                          MiniMax provider + ffmpeg audio/talking-head post-processing
+│                          Bailian CosyVoice / MiniMax providers + ffmpeg media post-processing
 ├── content-graph/         Multi-frame storyboard IR (nodes + edges, topo-sort)
 │ runtime/               Agent runtime — detect / spawn / stream
 │                          (Open Design/Vela · Windsurf CLI · Trae CLI · Claude · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · Anthropic API)
@@ -258,7 +258,7 @@ packages/
 ├── adapter-remotion/      Remotion adapter — optional native data-frame enhancement
 ├── cli/                   `html-video` command + the studio HTTP server + source fetching
 └── project-studio/        Browser studio UI (chat, template gallery, frames, talking-head, soundtrack, export)
-templates/                 37 curated, license-clean video templates
+templates/                 38 curated, license-clean video templates
 research/                  RFCs (engine adapter / template metadata / agent skill / content-graph)
 ```
 

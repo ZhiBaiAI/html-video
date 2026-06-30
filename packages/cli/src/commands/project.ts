@@ -5,6 +5,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { Project } from '@html-video/core';
 import type { CliContext } from '../context.js';
 import { fail, ok, progress } from '../output.js';
 
@@ -58,7 +59,7 @@ export async function projectAddAsset(
     caption?: string;
   },
 ): Promise<void> {
-  let project;
+  let project: Project;
   if (opts.file) {
     const f = resolve(opts.file);
     if (!existsSync(f)) fail('asset-not-found', `File not found: ${f}`);

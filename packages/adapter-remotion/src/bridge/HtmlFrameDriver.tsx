@@ -10,7 +10,8 @@
 //
 // Not compiled by the adapter's tsc; it's a static asset handed to Remotion's
 // bundle() (webpack understands the JSX).
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import type React from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCurrentFrame, useVideoConfig, delayRender, continueRender } from 'remotion';
 
 export type HtmlFrameDriverProps = {
@@ -139,10 +140,11 @@ export const HtmlFrameDriver: React.FC<HtmlFrameDriverProps> = ({ html, width, h
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tMs, seek]);
+  }, [tMs, seek, handle]);
 
   return (
     <iframe
+      title="HTML video frame"
       ref={iframeRef}
       srcDoc={html}
       width={width}

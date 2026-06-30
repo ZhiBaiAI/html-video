@@ -179,7 +179,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       if (addAssetMatch && addAssetMatch[1] && m === 'POST') {
         const id = addAssetMatch[1];
         const ct = req.headers['content-type'] ?? '';
-        let project;
+        let project: Project;
         if (ct.startsWith('multipart/form-data')) {
           // Save uploaded file to /tmp then add
           const saved = await receiveMultipartFile(req, ct);
@@ -1100,7 +1100,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             fitSource = 'audio';
             const MIN = 2;
             // Each frame's share of the real audio length, by char count.
-            let durs = updatedGraph.nodes.map((n) => {
+            const durs = updatedGraph.nodes.map((n) => {
               const seg2 = narrationByFrame[n.id] ?? '';
               const d = Math.max(MIN, Math.round((seg2.trim().length / totalChars) * audioDur));
               return { n, d };
@@ -2214,7 +2214,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         }
         const total = audioTotal ?? Math.max(currentTotal, neededForSpeech, MIN * graph.nodes.length);
         // Proportional by char share, then lift any frame below MIN.
-        let durs = graph.nodes.map((n) => ({ n, d: Math.max(MIN, Math.round((lenOf(n.id) / totalChars) * total)) }));
+        const durs = graph.nodes.map((n) => ({ n, d: Math.max(MIN, Math.round((lenOf(n.id) / totalChars) * total)) }));
         // Re-normalize so the rounded sum matches `total` (adjust the longest frame).
         const sum = durs.reduce((s, x) => s + x.d, 0);
         if (sum !== total && durs.length) {

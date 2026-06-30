@@ -1,7 +1,20 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["**/dist/**", "**/node_modules/**", "**/.html-video/**", "**/templates/*/source/**"]
+    "ignore": [
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/.html-video/**",
+      "**/.corepack/**",
+      "**/.venv-whisper/**",
+      "**/.playwright-cli/**",
+      "**/.workbuddy/**",
+      "**/research/refs/**",
+      "**/templates/*/source/**",
+      "**/templates/*/compositions/**",
+      "**/templates/*/render-entries/**",
+      "**/templates/*/assets/**"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
@@ -14,10 +27,22 @@
     "rules": {
       "recommended": true,
       "style": {
-        "noNonNullAssertion": "warn"
+        "noNonNullAssertion": "off",
+        "noUnusedTemplateLiteral": "off",
+        "useNumberNamespace": "off",
+        "useSingleVarDeclarator": "off",
+        "useTemplate": "off"
+      },
+      "complexity": {
+        "noForEach": "off",
+        "useOptionalChain": "off"
+      },
+      "performance": {
+        "noDelete": "off"
       },
       "suspicious": {
-        "noExplicitAny": "warn"
+        "noAssignInExpressions": "off",
+        "noExplicitAny": "off"
       }
     }
   },

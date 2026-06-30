@@ -68,13 +68,13 @@ node packages/cli/dist/bin.js search-templates --intent "data chart" --top 5
 
 ```
 packages/
-├── core/                  Types, registries, orchestrator, MiniMax + ffmpeg audio
+├── core/                  Types, registries, orchestrator, narration + ffmpeg media
 ├── content-graph/         Multi-frame storyboard IR (nodes + edges, topo-sort)
 ├── runtime/               Agent runtime — detect / spawn / stream (13 agents)
 ├── adapter-hyperframes/   Hyperframes engine adapter — Chromium + ffmpeg render
 ├── cli/                   `html-video` command + studio HTTP server + source fetching
 └── project-studio/        Browser studio UI (chat, gallery, frames, soundtrack, export)
-templates/                 21 curated, license-clean video templates
+templates/                 38 curated, license-clean video templates
 research/                  RFCs (engine adapter / template metadata / agent skill / content-graph)
 ```
 
@@ -142,15 +142,21 @@ Templates live under `templates/<id>/` and are described by a `template.html-vid
 ```
 templates/frame-my-cool-animation/
 ├── template.html-video.yaml   # Required — see format below
-├── source/index.html          # Required — the animated HTML (Hyperframes engine)
-├── SKILL.md                   # Agent-readable instructions for filling in the template
-├── example.md                 # Example input
+├── source/index.html          # Animated HTML; exact path is declared by source_entry
+├── SKILL.md                   # Optional portable agent guidance
+├── example.md                 # Optional worked input example
 └── poster.svg / preview.png   # Static preview image
 ```
 
+`source_entry` is the source of truth. It may point at `source/index.html`, a root
+`index.html`, or a native-engine entry such as `source/entry.ts`; template directories
+are not pnpm workspace packages.
+
 ### Provenance rules (RFC-07)
 
-Every template MUST follow the [RFC-07 provenance rules](research/2026-06-04-spec-07-ppt-to-template.md):
+Every imported or transformed third-party template MUST follow the
+[RFC-07 provenance rules](research/2026-06-04-spec-07-ppt-to-template.md).
+Original html-video templates declare `author` and an Apache-2.0 license directly:
 
 1. **License gate**: Only permissive open-source licenses (MIT, Apache-2.0, BSD, CC-BY, CC-BY-SA). No NC, ND, or unlicensed sources.
 2. **Three-layer attribution**: L1 (original design studio/designer) → L2 (skill/upstream author) → L3 (our transformation). All three must be recorded in `provenance`.
@@ -421,15 +427,20 @@ node packages/cli/dist/bin.js doctor  # 如果二进制在 PATH 上，你的 age
 ```
 templates/frame-my-cool-animation/
 ├── template.html-video.yaml   # 必选 —— 格式见下文
-├── source/index.html          # 必选 —— 带动画的 HTML（Hyperframes 引擎）
-├── SKILL.md                   # Agent 可读的填参说明
-├── example.md                 # 示例输入
+├── source/index.html          # 动画源码；准确路径由 source_entry 声明
+├── SKILL.md                   # 可选：便携的 agent 使用说明
+├── example.md                 # 可选：完整输入示例
 └── poster.svg / preview.png   # 静态预览图
 ```
 
+`source_entry` 是唯一真实入口，可以指向 `source/index.html`、根目录 `index.html`，
+也可以指向 `source/entry.ts` 这样的原生引擎入口；模板目录不是 pnpm workspace 包。
+
 #### 来源规范（RFC-07）
 
-每个模板必须遵守 [RFC-07 来源规范](research/2026-06-04-spec-07-ppt-to-template.md)：
+所有导入或改造自第三方的模板必须遵守
+[RFC-07 来源规范](research/2026-06-04-spec-07-ppt-to-template.md)。
+html-video 原创模板则直接声明 `author` 和 Apache-2.0 许可：
 
 1. **许可闸门**：只收明确宽松开源的许可（MIT、Apache-2.0、BSD、CC-BY、CC-BY-SA）。不收 NC、ND 或无许可的来源。
 2. **三层署名**：L1（原始设计工作室/设计师）→ L2（skill/上游作者）→ L3（我们的转化）。三层都必须记在 `provenance` 里。

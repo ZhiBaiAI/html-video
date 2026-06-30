@@ -15,8 +15,7 @@
   },
   "packageManager": "pnpm@9.15.0",
   "workspaces": [
-    "packages/*",
-    "templates/*"
+    "packages/*"
   ],
   "scripts": {
     "build": "pnpm -r build",

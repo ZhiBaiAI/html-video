@@ -47,7 +47,7 @@ v0.8 之后，项目已经从"协议骨架"推进到可跑的本地闭环：
 
 - ✅ Hyperframes adapter 已接真实渲染链路：Playwright 抓帧 + ffmpeg 编码，单帧/多帧 `exportMp4` 都会产出非空 MP4，不再是占位实现。
 - ✅ Remotion adapter 已接入可选增强路径：`frame-data-rollup` 这类数据滚动帧可走 Remotion 原生渲染，其余仍由 Hyperframes 兜底。
-- ✅ 模板库当前为 37 个模板；`TemplateRegistry.scan()` 自动扫描 `templates/<id>/template.html-video.yaml`。
+- ✅ 模板库当前为 38 个模板；`TemplateRegistry.scan()` 自动扫描 `templates/<id>/template.html-video.yaml`。
 - ✅ 已补模板注册质量门槛：scan 时校验必要 metadata、目录 id 一致性、入口文件存在、重复 id；不再静默吞掉坏模板。
 - ✅ 已补模板搜索权重：`github stars` / metrics / data / chart 等意图能优先召回数据类模板。
 - ✅ smoke 已覆盖单帧真实导出、多帧 content graph + 3 frames + concat 导出，并检查 MP4 非空。

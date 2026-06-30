@@ -1,7 +1,7 @@
 // Root — registers the single generic bridge composition. render.ts overrides
 // width/height/fps/durationInFrames per call via selectComposition(), and passes
 // the HTML frame path + size through inputProps. (RFC-08 §5)
-import React from 'react';
+import type React from 'react';
 import { Composition } from 'remotion';
 import { HtmlFrameDriver, type HtmlFrameDriverProps } from './HtmlFrameDriver';
 
