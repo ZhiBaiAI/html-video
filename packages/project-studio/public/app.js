@@ -10,6 +10,18 @@ const DEFAULT_CLONE_AUDIO_URL = [
   '&security-token=CAIS2AJ1q6Ft5B2yfSjIr5mEHOzhjKpK7aemen%2FeoTQ%2Fa7wYvaGYqDz2IHhMenRoAu8fv%2FU1nmlQ6%2FsZlrp6SJtIXleCZtF94oxN9h2gb4fb4y1LA2qH08%2FLI3OaLjKm9u2wCryLYbGwU%2FOpbE%2B%2B5U0X6LDmdDKkckW4OJmS8%2FBOZcgWWQ%2FKBlgvRq0hRG1YpdQdKGHaONu0LxfumRCwNkdzvRdmgm4NgsbWgO%2Fks0CD0w2rlLFL%2BdugcsT4MvMBZskvD42Hu8VtbbfE3SJq7BxHybx7lqQs%2B02c5onDXgEKvEzXYrCOq4UycVRjE6IgHKdIt%2FP7jfA9sOHVnITywgxOePlRWjjRQ5ql0E4ehBQP3yBTn9%2FVTJeturjnXvGd24ikVa0RnwBBMhytfsq8tbjo7uXGa%2FbB1hmjSUyYUMumi%2BluDkYtlgzV9eKArlL3Sa2Rv07lcjH7NCtAXxqAAT6Yetg3RRB6Z%2BsfiRqjNnfHABdKlyh38F%2Fvw2aRvgJxA2efFAA5N6MvQY2g6juFRm3amck7ITMezlp1SMVRAhGORlhklC03RCVGB8zcadmvQ0pvS0id0%2BoND0X92QVgN7DPUk98f5uO0TJP9d28fxW8by6sZn8s4%2FFcDtO2o%2BVSIAA%3D',
 ].join('');
 
+const CHAT_PANE_WIDTH_KEY = 'html-video.chatPaneWidth';
+
+function readStoredChatPaneWidth() {
+  try {
+    const raw = window.localStorage.getItem(CHAT_PANE_WIDTH_KEY);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 // Re-render whole UI on language change.
 document.addEventListener('hv-locale-change', () => {
   document.documentElement.lang = getLocale();
@@ -80,6 +92,7 @@ const API = {
   templates: () => fetch('/api/templates').then(r => r.json()),
   agents: () => fetch('/api/agents').then(r => r.json()),
   setTemplate: (id, tid) => fetch(`/api/projects/${id}/template`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template_id: tid }) }).then(r => r.json()),
+  restyleTemplate: id => fetch(`/api/projects/${id}/template/restyle`, { method: 'POST', headers: { accept: 'text/event-stream' } }),
   setAgent: (id, aid, model) => fetch(`/api/projects/${id}/agent`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent_id: aid, ...(model !== undefined && { agent_model: model }) }) }).then(r => r.json()),
   exportMp4: id => fetch(`/api/projects/${id}/export`, { method: 'POST' }).then(r => r.json()),
   getMessages: id => fetch(`/api/projects/${id}/messages`).then(r => r.json()),
@@ -141,10 +154,16 @@ const state = {
   exporting: false,        // export run in progress
   exportProgress: null,    // { pct, stage } during a streamed export
   narrating: false,        // one-click narrate-to-video run in progress
+  composerMode: 'describe', // describe | link | script
+  composerTemplateId: '',
+  composerAspect: '16:9',
+  composerVoiceId: '',
+  chatPaneWidth: readStoredChatPaneWidth(),
   lastGraph: null,         // last fetched ContentGraph (for download)
   // Phase C: per-frame native Remotion enhancement
   frameKinds: {},          // { [graphNodeId]: 'entity'|'data'|'text' } for the selected project
   enhancing: null,         // { nodeId, pct, stage } while a single-frame enhance render is in flight
+  regeneratingFrame: null, // graphNodeId while a single frame is being regenerated
   narrationVoices: [],
   defaultNarrationVoiceId: null,
   transcribingTalkingHead: false,
@@ -202,6 +221,34 @@ function narrationVoiceOptions() {
     .join('');
   return `<optgroup label="${esc(t('soundtrack.builtin_voices'))}">${builtIn}</optgroup>`
     + (cloned ? `<optgroup label="${esc(t('soundtrack.cloned_voices'))}">${cloned}</optgroup>` : '');
+}
+
+function selectedAspectRatio() {
+  const res = state.selected?.preferences?.resolution;
+  if (res?.width && res?.height) {
+    const ratio = res.width / res.height;
+    if (Math.abs(ratio - 9 / 16) < 0.08) return '9:16';
+    if (Math.abs(ratio - 1) < 0.08) return '1:1';
+    if (Math.abs(ratio - 4 / 5) < 0.08) return '4:5';
+  }
+  return '16:9';
+}
+
+function composerTemplateOptions() {
+  const current = state.composerTemplateId || state.selected?.templateId || '';
+  const noneOpt = `<option value="">${esc(t('composer.control.no_template'))}</option>`;
+  const tplOpts = (state.templates || []).map((tpl) => {
+    const selected = tpl.id === current ? ' selected' : '';
+    return `<option value="${esc(tpl.id)}"${selected}>${esc(templateDisplayName(tpl) || tpl.id)}</option>`;
+  }).join('');
+  return noneOpt + tplOpts;
+}
+
+function composerAspectOptions() {
+  const current = state.composerAspect || selectedAspectRatio();
+  return ['16:9', '9:16', '1:1', '4:5']
+    .map((aspect) => `<option value="${aspect}"${aspect === current ? ' selected' : ''}>${aspect}</option>`)
+    .join('');
 }
 
 function syncNarrationVoiceSelect() {
@@ -413,6 +460,76 @@ async function unenhanceFrameAction(nodeId) {
   }
 }
 
+async function startFrameRegenerateStream(nodeId) {
+  if (!state.selected || !nodeId || state.regeneratingFrame || state.composing || state.narrating) return;
+  const projectId = state.selected.id;
+  state.regeneratingFrame = nodeId;
+  state.activeFrameId = nodeId;
+  state.iterateFocusFrameId = nodeId;
+  renderFramesStrip();
+  state.messages.push({ role: 'preview-event', content: t('frames.regenerate_started', { id: nodeId }), ts: Date.now() });
+  renderChatLog();
+
+  let res;
+  try {
+    res = await fetch(`/api/projects/${projectId}/frames/${encodeURIComponent(nodeId)}/regenerate`, {
+      method: 'POST',
+      headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+  } catch (e) {
+    state.regeneratingFrame = null;
+    toast(t('frames.regenerate_failed', { message: (e?.message ?? e) }), 'error');
+    renderFramesStrip();
+    return;
+  }
+  if (!res.ok || !res.body) {
+    const err = await res.text().catch(() => '');
+    state.regeneratingFrame = null;
+    toast(t('frames.regenerate_failed', { message: err.slice(0, 200) || `HTTP ${res.status}` }), 'error');
+    renderFramesStrip();
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() ?? '';
+      for (const line of events) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        if (ev.type === 'frame_regenerate_done') {
+          state.regeneratingFrame = null;
+          if (ev.project) state.selected = ev.project;
+          state.activeFrameId = ev.node_id || nodeId;
+          state.iterateFocusFrameId = ev.node_id || nodeId;
+          state.messages.push({ role: 'preview-event', content: t('frames.regenerate_done', { id: ev.node_id || nodeId }), ts: Date.now() });
+          renderChatLog();
+          renderFramesStrip();
+          renderPreview();
+          await refreshTextFields();
+          refreshProjects();
+        } else if (ev.type === 'frame_regenerate_failed') {
+          state.regeneratingFrame = null;
+          toast(t('frames.regenerate_failed', { message: ev.message }), 'error');
+          renderFramesStrip();
+        }
+      }
+    }
+  } catch (e) {
+    state.regeneratingFrame = null;
+    toast(t('frames.regenerate_failed', { message: (e?.message ?? e) }), 'error');
+    renderFramesStrip();
+  }
+}
+
 /**
  * Detect "I want to export this to MP4" intent in a chat message.
  * Hits both Chinese + English without leaning on the agent.
@@ -466,6 +583,10 @@ async function selectProject(id) {
   state.iterateFocusFrameId = null;
   state.editTextMode = false;
   state.enhancing = null;
+  state.regeneratingFrame = null;
+  state.composerTemplateId = state.selected?.templateId || '';
+  state.composerAspect = selectedAspectRatio();
+  state.composerVoiceId = state.defaultNarrationVoiceId || '';
   // Phase C: map graph node id → kind so the strip can show the "⚡ Enhance"
   // toggle only on data frames. One fetch per project switch.
   state.frameKinds = {};
@@ -617,39 +738,46 @@ function renderToolbar() {
   const pickBtn = document.getElementById('btn-pick-template');
   const exportBtn = document.getElementById('btn-export');
 
-  nameInput.disabled = !p;
-  nameInput.placeholder = p ? '' : t('app.no_project');
-  nameInput.value = p?.name ?? '';
+  if (nameInput) {
+    nameInput.disabled = !p;
+    nameInput.placeholder = p ? '' : t('app.no_project');
+    nameInput.value = p?.name ?? '';
+  }
 
-  pickBtn.disabled = !p;
-  if (p && p.templateId) {
-    const tpl = state.templates.find(x => x.id === p.templateId);
-    pickBtn.classList.remove('empty');
-    pickBtn.querySelector('.label').textContent = tpl ? templateDisplayName(tpl) : p.templateId;
-  } else {
-    pickBtn.classList.add('empty');
-    pickBtn.querySelector('.label').textContent = t('toolbar.template_pick');
+  if (pickBtn) {
+    pickBtn.disabled = !p;
+    if (p && p.templateId) {
+      const tpl = state.templates.find(x => x.id === p.templateId);
+      pickBtn.classList.remove('empty');
+      pickBtn.querySelector('.label').textContent = tpl ? templateDisplayName(tpl) : p.templateId;
+    } else {
+      pickBtn.classList.add('empty');
+      pickBtn.querySelector('.label').textContent = t('toolbar.template_pick');
+    }
   }
 
   // Frames-mode projects don't need a template to export — they have
   // frames[] directly. Single-frame projects still need a template until
   // the v0.x stub is gone.
   const hasFrames = !!(p && Array.isArray(p.frames) && p.frames.length > 0);
-  exportBtn.disabled = !p || (!p.templateId && !hasFrames) || !!state.exporting;
+  if (exportBtn) exportBtn.disabled = !p || (!p.templateId && !hasFrames) || !!state.exporting;
   // Narrate needs a project + an agent; block while exporting/narrating.
   const narrateBtn = document.getElementById('btn-narrate');
   if (narrateBtn) narrateBtn.disabled = !p || !!state.exporting || !!state.narrating;
   if (state.exporting) {
-    exportBtn.textContent = state.exportProgress
-      ? t('export.button_running', {
-          pct: formatPct(state.exportProgress.pct),
-          stage: state.exportProgress.stage,
-        })
-      : t('export.starting');
+    if (exportBtn) {
+      exportBtn.textContent = state.exportProgress
+        ? t('export.button_running', {
+            pct: formatPct(state.exportProgress.pct),
+            stage: state.exportProgress.stage,
+          })
+        : t('export.starting');
+    }
   } else {
-    exportBtn.textContent = t('toolbar.export_mp4');
+    if (exportBtn) exportBtn.textContent = t('toolbar.export_mp4');
   }
   renderAgentPill();
+  renderComposer();
 
   // Re-wire on every render so handlers always match the current DOM.
   wireToolbar();
@@ -872,6 +1000,12 @@ function renderMain() {
         <button class="sidebar-toggle" id="btn-sidebar-toggle" title="${t('sidebar.collapse')}">‹</button>
       </div>
       <div class="project-list" id="project-list"></div>
+      <div class="sidebar-foot">
+        <button class="sidebar-settings-btn" id="btn-settings" title="${t('settings.title')}" aria-label="${t('settings.title')}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span class="sidebar-settings-label">${t('settings.title')}</span>
+        </button>
+      </div>
     </aside>
 
     ${state.selected
@@ -881,16 +1015,40 @@ function renderMain() {
           <div class="composer">
             <div class="composer-shell" id="composer-shell">
               <div class="attachments" id="attachments"></div>
-              <textarea id="composer-input" placeholder="..." rows="2"></textarea>
+              <textarea id="composer-input" placeholder="..." rows="3"></textarea>
+              <div class="composer-controls">
+                <label class="composer-control">
+                  <span>${t('composer.control.mode')}</span>
+                  <select id="composer-mode">
+                    <option value="describe">${t('composer.mode.describe')}</option>
+                    <option value="link">${t('composer.mode.link')}</option>
+                    <option value="script">${t('composer.mode.script')}</option>
+                  </select>
+                </label>
+                <label class="composer-control">
+                  <span>${t('composer.control.template')}</span>
+                  <select id="composer-template">${composerTemplateOptions()}</select>
+                </label>
+                <label class="composer-control">
+                  <span>${t('composer.control.aspect')}</span>
+                  <select id="composer-aspect">${composerAspectOptions()}</select>
+                </label>
+                <label class="composer-control">
+                  <span>${t('composer.control.voice')}</span>
+                  <select id="composer-voice">${narrationVoiceOptions()}</select>
+                </label>
+              </div>
               <div class="actions">
                 <button class="icon-btn" id="btn-attach" title="${t('composer.attach')}">📎</button>
                 <input type="file" id="file-input" multiple style="display:none" />
                 <span class="hint">${t('composer.hint')}</span>
+                <button class="composer-export-btn" id="composer-export" disabled>${t('composer.export')}</button>
                 <button class="send-btn" id="btn-send" disabled>${t('composer.send')}</button>
               </div>
             </div>
           </div>
         </section>
+        <div class="pane-resizer" id="chat-preview-resizer" role="separator" aria-orientation="vertical" tabindex="0" title="${t('layout.resize_panes')}" aria-label="${t('layout.resize_panes')}"></div>
 
         <section class="right-pane">
           <div class="preview-stage" id="preview-stage">
@@ -1038,6 +1196,7 @@ function renderMain() {
           <p>${t('app.empty_subtitle')}</p></div></div>`}
   `;
   // Re-attach sidebar handlers (renderMain rebuilt the DOM)
+  applyChatPaneWidth();
   renderSidebar();
   document.getElementById('btn-new').onclick = createDefaultProject;
   const togBtn = document.getElementById('btn-sidebar-toggle');
@@ -1050,6 +1209,7 @@ function renderMain() {
     renderPreview();
     renderFooter();
     document.getElementById('btn-send').onclick = sendMessage;
+    wireComposerControls();
     document.getElementById('composer-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
@@ -1059,6 +1219,7 @@ function renderMain() {
     document.getElementById('btn-attach').onclick = () => document.getElementById('file-input').click();
     document.getElementById('file-input').onchange = (e) => addAttachments([...e.target.files]);
     wireDragAndPaste();
+    wirePaneResizer();
     document.getElementById('btn-reload').onclick = () => { reloadPreview(); refreshTextFields(); };
     wireTalkingHeadPanel();
     wireSoundtrackPanel();
@@ -1548,18 +1709,202 @@ function wireDragAndPaste() {
   });
 }
 
+function clampChatPaneWidth(width) {
+  const body = document.getElementById('body');
+  if (!body) return width;
+  const sidebar = body.querySelector('.sidebar')?.getBoundingClientRect().width ?? 0;
+  const textPane = body.querySelector('.text-pane')?.getBoundingClientRect().width ?? 0;
+  const total = body.getBoundingClientRect().width;
+  const minChat = 280;
+  const minPreview = 360;
+  const handle = 8;
+  const maxChat = Math.max(minChat, total - sidebar - textPane - minPreview - handle);
+  return Math.min(Math.max(width, minChat), maxChat);
+}
+
+function setChatPaneWidth(width, persist = false) {
+  const body = document.getElementById('body');
+  if (!body) return;
+  const next = Math.round(clampChatPaneWidth(width));
+  state.chatPaneWidth = next;
+  body.style.setProperty('--chat-pane-w', `${next}px`);
+  if (persist) {
+    try { window.localStorage.setItem(CHAT_PANE_WIDTH_KEY, String(next)); } catch {}
+  }
+}
+
+function applyChatPaneWidth() {
+  if (state.chatPaneWidth) setChatPaneWidth(state.chatPaneWidth, false);
+}
+
+function wirePaneResizer() {
+  const handle = document.getElementById('chat-preview-resizer');
+  const chat = document.querySelector('.chat-pane');
+  if (!handle || !chat) return;
+
+  handle.onpointerdown = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = chat.getBoundingClientRect().width;
+    document.body.classList.add('pane-resizing');
+    handle.setPointerCapture?.(e.pointerId);
+
+    const move = (ev) => {
+      setChatPaneWidth(startWidth + ev.clientX - startX, false);
+    };
+    const up = (ev) => {
+      setChatPaneWidth(startWidth + ev.clientX - startX, true);
+      document.body.classList.remove('pane-resizing');
+      handle.releasePointerCapture?.(e.pointerId);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  };
+
+  handle.onkeydown = (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const delta = e.key === 'ArrowLeft' ? -24 : 24;
+    const current = chat.getBoundingClientRect().width;
+    setChatPaneWidth(current + delta, true);
+  };
+}
+
+function wireComposerControls() {
+  const modeSel = document.getElementById('composer-mode');
+  if (modeSel) {
+    modeSel.value = state.composerMode || 'describe';
+    modeSel.onchange = () => {
+      state.composerMode = modeSel.value || 'describe';
+      renderComposer();
+    };
+  }
+
+  const tplSel = document.getElementById('composer-template');
+  if (tplSel) {
+    tplSel.onchange = async () => {
+      const templateId = tplSel.value;
+      if (!state.selected) {
+        renderComposer();
+        return;
+      }
+      if (!templateId) {
+        state.composerTemplateId = state.selected.templateId || '';
+        renderComposer();
+        return;
+      }
+      if (templateId === state.selected.templateId) {
+        state.composerTemplateId = templateId;
+        renderComposer();
+        return;
+      }
+      const tpl = state.templates.find((x) => x.id === templateId);
+      const templateName = templateDisplayName(tpl) || templateId;
+      const shouldRestyleFrames = Array.isArray(state.selected.frames) && state.selected.frames.length > 0;
+      const ok = window.confirm(t(
+        shouldRestyleFrames ? 'composer.template_confirm_restyle' : 'composer.template_confirm',
+        { name: templateName },
+      ));
+      if (!ok) {
+        state.composerTemplateId = state.selected.templateId || '';
+        renderComposer();
+        return;
+      }
+      state.composerTemplateId = templateId;
+      try {
+        tplSel.disabled = true;
+        await API.setTemplate(state.selected.id, templateId);
+        await selectProject(state.selected.id);
+        toast(t('tpl_preview.applied', { name: templateName }), 'success');
+        if (shouldRestyleFrames) {
+          void startTemplateRestyleStream(templateName);
+        }
+      } catch (e) {
+        state.composerTemplateId = state.selected?.templateId || '';
+        toast(`⚠️ ${e?.message ?? e}`, 'error');
+        renderComposer();
+      }
+    };
+  }
+
+  const aspectSel = document.getElementById('composer-aspect');
+  if (aspectSel) aspectSel.onchange = () => { state.composerAspect = aspectSel.value || '16:9'; };
+
+  const voiceSel = document.getElementById('composer-voice');
+  if (voiceSel) {
+    if (state.composerVoiceId && [...voiceSel.options].some((o) => o.value === state.composerVoiceId)) {
+      voiceSel.value = state.composerVoiceId;
+    } else if (state.defaultNarrationVoiceId && [...voiceSel.options].some((o) => o.value === state.defaultNarrationVoiceId)) {
+      voiceSel.value = state.defaultNarrationVoiceId;
+      state.composerVoiceId = state.defaultNarrationVoiceId;
+    } else {
+      state.composerVoiceId = voiceSel.value || '';
+    }
+    voiceSel.onchange = () => { state.composerVoiceId = voiceSel.value || ''; };
+  }
+
+  const exportBtn = document.getElementById('composer-export');
+  if (exportBtn) {
+    exportBtn.onclick = () => {
+      if (!state.selected || state.exporting) return;
+      startExportStream();
+    };
+  }
+}
+
 function renderComposer() {
   const p = state.selected;
   const ta = document.getElementById('composer-input');
   const sendBtn = document.getElementById('btn-send');
-  if (!ta) return;
+  if (!ta || !sendBtn) return;
   const availableAgents = state.agents.filter(a => a.available);
   const agentsKnown = state.agents.length > 0;
   const canUseLocalTranscript = !!p?.talkingHead?.transcriptAssetId;
-  const canType = !!p && !state.composing;
-  const canSend = !!(p && (availableAgents.length > 0 || canUseLocalTranscript) && !state.composing);
+  const canType = !!p && !state.composing && !state.narrating;
+  const canSend = !!(p && (availableAgents.length > 0 || canUseLocalTranscript) && !state.composing && !state.narrating);
   ta.disabled = !canType;
   sendBtn.disabled = !canSend;
+
+  const mode = state.composerMode || 'describe';
+  const modeSel = document.getElementById('composer-mode');
+  if (modeSel) {
+    modeSel.value = [...modeSel.options].some((o) => o.value === mode) ? mode : 'describe';
+    modeSel.disabled = !p || state.composing || state.narrating;
+  }
+  const tplSel = document.getElementById('composer-template');
+  if (tplSel) {
+    const current = state.composerTemplateId || p?.templateId || '';
+    tplSel.value = [...tplSel.options].some((o) => o.value === current) ? current : '';
+    tplSel.disabled = !p || state.composing || state.narrating;
+  }
+  const aspectSel = document.getElementById('composer-aspect');
+  if (aspectSel) {
+    const current = state.composerAspect || selectedAspectRatio();
+    aspectSel.value = [...aspectSel.options].some((o) => o.value === current) ? current : '16:9';
+    aspectSel.disabled = !p || state.composing || state.narrating;
+  }
+  const voiceSel = document.getElementById('composer-voice');
+  if (voiceSel) {
+    const current = state.composerVoiceId || state.defaultNarrationVoiceId || voiceSel.value;
+    if ([...voiceSel.options].some((o) => o.value === current)) voiceSel.value = current;
+    voiceSel.disabled = !p || state.composing || state.narrating || mode !== 'script';
+  }
+  const exportBtn = document.getElementById('composer-export');
+  if (exportBtn) {
+    const hasFrames = !!(p && Array.isArray(p.frames) && p.frames.length > 0);
+    exportBtn.disabled = !p || (!p.templateId && !hasFrames) || state.exporting || state.narrating;
+    exportBtn.textContent = state.exporting
+      ? (state.exportProgress
+        ? t('export.button_running', {
+            pct: formatPct(state.exportProgress.pct),
+            stage: state.exportProgress.stage,
+          })
+        : t('export.starting'))
+      : t('composer.export');
+  }
 
   // Focus chip: when a frame is pinned for single-frame iterate, show it
   // above the textarea so the user knows their next message will only
@@ -1595,6 +1940,8 @@ function renderComposer() {
     : availableAgents.length === 0 && canUseLocalTranscript ? t('composer.placeholder.local_transcript')
     : availableAgents.length === 0 ? t('composer.placeholder.no_agent')
     : state.iterateFocusFrameId ? t('composer.placeholder.focus')
+    : mode === 'script' ? t('composer.placeholder.script')
+    : mode === 'link' ? t('composer.placeholder.link')
     : !p.templateId ? t('composer.placeholder.no_template')
     : t('composer.placeholder.with_template');
 }
@@ -2469,6 +2816,8 @@ function renderFramesStrip() {
     // overlay badge ON the thumbnail (top area) so it's obvious + always visible.
     const isData = state.frameKinds[f.graphNodeId] === 'data';
     const busy = state.enhancing && state.enhancing.nodeId === f.graphNodeId;
+    const regenBusy = state.regeneratingFrame === f.graphNodeId;
+    const regenCtl = `<span class="frame-regenerate${regenBusy ? ' busy' : ''}" data-fid="${esc(f.graphNodeId)}" title="${esc(t('frames.regenerate_hint'))}">${regenBusy ? esc(t('frames.regenerating')) : '↻'}</span>`;
     let enhanceCtl = '';
     if (isData) {
       if (busy) {
@@ -2482,6 +2831,7 @@ function renderFramesStrip() {
     return `<button class="${cls}${isData ? ' is-data' : ''}" data-fid="${esc(f.graphNodeId)}">
       <div class="frame-thumb">
         ${thumbInner}
+        ${regenCtl}
         ${enhanceCtl}
         ${isFocus ? '<div class="focus-mark" title="正在编辑此帧">✎</div>' : ''}
       </div>
@@ -2527,6 +2877,14 @@ function renderFramesStrip() {
       const fid = el.dataset.fid;
       if (el.dataset.act === 'unenhance') unenhanceFrameAction(fid);
       else if (el.dataset.act === 'enhance') startEnhanceStream(fid);
+    });
+  });
+  strip.querySelectorAll('.frame-regenerate').forEach((el) => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.regeneratingFrame) return;
+      const fid = el.dataset.fid;
+      startFrameRegenerateStream(fid);
     });
   });
   const gbtn = document.getElementById('btn-show-graph');
@@ -2741,6 +3099,11 @@ async function sendMessage() {
   const hasAttachments = state.pendingAttachments.length > 0;
   if (!text && !hasAttachments) return;
 
+  if (state.composerMode === 'script' && text) {
+    await runComposerNarrate(text);
+    return;
+  }
+
   // Intent shortcut: if the message is a clear "export to MP4" command
   // and there's something to export, run the export flow directly
   // instead of routing through the agent. The agent has nothing useful
@@ -2909,6 +3272,203 @@ async function sendMessage() {
   if (state.selectedId === genProjectId) {
     state.composing = false;
     renderComposer();
+  }
+}
+
+async function runComposerNarrate(script) {
+  if (!state.selected || state.narrating) return;
+  const agentId = currentAgentId();
+  if (!agentId) { toast(t('narrate.agent_required'), 'error'); return; }
+
+  const projectId = state.selected.id;
+  const ta = document.getElementById('composer-input');
+  const voiceSel = document.getElementById('composer-voice');
+  const tplSel = document.getElementById('composer-template');
+  const aspectSel = document.getElementById('composer-aspect');
+  const voiceId = voiceSel?.value || state.composerVoiceId || undefined;
+  const templateId = tplSel?.value || state.composerTemplateId || undefined;
+  const aspect = aspectSel?.value || state.composerAspect || '16:9';
+
+  const payload = {
+    mode: 'script',
+    agentId,
+    aspect,
+    script,
+    ...(voiceId && { voiceId }),
+    ...(templateId && { templateId }),
+  };
+
+  if (ta) ta.value = '';
+  state.narrating = true;
+  state.composing = true;
+  state.messages.push({ role: 'user', content: script, ts: Date.now() });
+  state.messages.push({
+    role: 'assistant',
+    agent: state.selected.agentId ?? agentId,
+    content: t('composer.narrate_started'),
+    ts: Date.now(),
+  });
+  const assistantIdx = state.messages.length - 1;
+  renderChatLog();
+  renderToolbar();
+  renderComposer();
+
+  const appendLine = (line) => {
+    state.messages[assistantIdx].content += `\n${line}`;
+    renderChatLog();
+  };
+
+  let narrateReady = false;
+  let audioDur = null;
+  try {
+    const res = await fetch(`/api/projects/${projectId}/narrate`, {
+      method: 'POST',
+      headers: { accept: 'text/event-stream', 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (state.selectedId !== projectId) { try { await reader.cancel(); } catch {} break; }
+      buf += decoder.decode(value, { stream: true });
+      const events = buf.split('\n\n');
+      buf = events.pop() ?? '';
+      for (const line of events) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        if (ev.type === 'narrate_progress') {
+          appendLine(t(ev.message_key ?? ev.message ?? ''));
+        } else if (ev.type === 'narrate_script') {
+          appendLine(`${t('narrate.tab_script')}: ${ev.script.slice(0, 120)}${ev.script.length > 120 ? '…' : ''}`);
+        } else if (ev.type === 'narrate_graph') {
+          appendLine(`✓ ${ev.frame_count} frames`);
+        } else if (ev.type === 'narrate_frame_done') {
+          appendLine(`✓ ${t('narrate.progress.frames')} ${ev.order + 1}/${ev.total}`);
+        } else if (ev.type === 'narrate_audio_done') {
+          appendLine(t('soundtrack.done'));
+        } else if (ev.type === 'narrate_ready' || ev.type === 'narrate_done') {
+          narrateReady = true;
+          audioDur = ev.audio_duration_sec;
+          if (ev.project && state.selectedId === projectId) state.selected = ev.project;
+        } else if (ev.type === 'narrate_failed') {
+          appendLine(t('narrate.failed', { message: ev.message }));
+        }
+      }
+    }
+  } catch (e) {
+    if (state.selectedId === projectId) appendLine(t('narrate.failed', { message: e?.message ?? e }));
+  } finally {
+    if (state.selectedId === projectId) {
+      state.narrating = false;
+      state.composing = false;
+      if (narrateReady) {
+        const sec = Number.isFinite(audioDur) ? Math.round(audioDur) : null;
+        state.messages[assistantIdx].content += `\n${sec != null ? t('narrate.done', { seconds: sec }) : t('narrate.done_no_seconds')}`;
+        try {
+          state.selected = (await API.getProject(projectId)).project;
+          state.composerTemplateId = state.selected?.templateId || state.composerTemplateId || '';
+          renderPreview();
+          renderFramesStrip();
+          renderFooter();
+          await refreshTextFields();
+          await refreshProjects();
+        } catch {}
+      }
+      renderChatLog();
+      renderToolbar();
+      renderComposer();
+    }
+  }
+}
+
+async function startTemplateRestyleStream(templateName = '') {
+  if (!state.selected || !Array.isArray(state.selected.frames) || state.selected.frames.length === 0) return;
+  if (state.composing) return;
+  const projectId = state.selected.id;
+  state.composing = true;
+  state.messages.push({
+    role: 'preview-event',
+    content: `🎨 已切换模板，正在按新模板重绘 ${state.selected.frames.length} 帧…`,
+    ts: Date.now(),
+  });
+  state.messages.push({
+    role: 'assistant',
+    agent: state.selected.agentId ?? 'agent',
+    content: '',
+    ts: Date.now(),
+  });
+  const assistantIdx = state.messages.length - 1;
+  renderChatLog();
+  renderComposer();
+
+  try {
+    const res = await API.restyleTemplate(projectId);
+    if (!res.ok || !res.body) {
+      const err = await res.json().catch(() => ({}));
+      state.messages[assistantIdx].content = `⚠️ ${err.error ?? 'template restyle failed'}`;
+      renderChatLog();
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (state.selectedId !== projectId) { try { await reader.cancel(); } catch {} break; }
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(6)); } catch { continue; }
+        if (ev.type === 'text') {
+          state.messages[assistantIdx].content += ev.chunk;
+          renderChatLog();
+        } else if (ev.type === 'preview_ready') {
+          state.messages.push({
+            role: 'preview-event',
+            content: `🎞 已按${templateName ? `「${templateName}」` : '新模板'}重绘完成`,
+            ts: Date.now(),
+          });
+          state.activeFrameId = null;
+          const pr = await API.getProject(projectId);
+          if (state.selectedId === projectId) {
+            state.selected = pr.project;
+            state.frameKinds = {};
+            try {
+              const cg = await API.contentGraph(projectId);
+              if (cg?.graph?.nodes) for (const n of cg.graph.nodes) state.frameKinds[n.id] = n.kind;
+            } catch {}
+            renderPreview();
+            await refreshTextFields();
+            renderToolbar();
+            renderFooter();
+          }
+          renderChatLog();
+        } else if (ev.type === 'error') {
+          state.messages[assistantIdx].content += `\n⚠️ ${ev.message}`;
+          renderChatLog();
+        }
+      }
+    }
+  } catch (e) {
+    if (state.selectedId === projectId) {
+      state.messages[assistantIdx].content += `\n⚠️ ${e?.message ?? e}`;
+      renderChatLog();
+    }
+  } finally {
+    if (state.selectedId === projectId) {
+      state.composing = false;
+      renderComposer();
+    }
   }
 }
 
@@ -3083,7 +3643,7 @@ async function runNarrate() {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
-  let mp4Filename = null;
+  let narrateReady = false;
   let audioDur = null;
   try {
     while (true) {
@@ -3110,8 +3670,13 @@ async function runNarrate() {
         } else if (ev.type === 'narrate_export_progress') {
           // Keep the export line as the live tail rather than stacking many.
           narrateLog(`⏵ ${formatPct(ev.pct)}% · ${esc(ev.stage)}`);
+        } else if (ev.type === 'narrate_ready') {
+          narrateReady = true;
+          audioDur = ev.audio_duration_sec;
+          if (ev.project) state.selected = ev.project;
         } else if (ev.type === 'narrate_done') {
-          mp4Filename = ev.mp4_filename;
+          // Backward-compatible with older servers that still exported here.
+          narrateReady = true;
           audioDur = ev.audio_duration_sec;
           if (ev.project) state.selected = ev.project;
         } else if (ev.type === 'narrate_failed') {
@@ -3125,13 +3690,13 @@ async function runNarrate() {
     return;
   }
 
-  if (mp4Filename) {
+  if (narrateReady) {
     const sec = Number.isFinite(audioDur) ? Math.round(audioDur) : null;
     narrateLog(esc(sec != null ? t('narrate.done', { seconds: sec }) : t('narrate.done_no_seconds')), 'ok');
     // Refresh frames/preview so the new storyboard + narration show up.
     await selectProject(state.selected.id);
   }
-  finishNarrate(!!mp4Filename);
+  finishNarrate(narrateReady);
 }
 
 function finishNarrate(ok) {
@@ -3140,7 +3705,7 @@ function finishNarrate(ok) {
   const startBtn = document.getElementById('narrate-start');
   if (startBtn) { startBtn.disabled = false; startBtn.textContent = t('narrate.start'); }
   if (ok) {
-    // Auto-close shortly after a successful export so the user lands on the result.
+    // Auto-close shortly after a successful render so the user lands on the editable result.
     setTimeout(closeNarrateModal, 1500);
   }
 }
@@ -3164,10 +3729,9 @@ function openGallery() {
     // data-composition-src) iframe-render blank until the HF player ships —
     // show the shipped poster instead. Falls back to the iframe when the
     // backend couldn't find a poster file (poster_url null).
-    const inner =
-      t.preview_mode === 'poster' && t.poster_url
-        ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(templateDisplayName(t) || t.id)}" loading="lazy" />`
-        : `<iframe sandbox="allow-scripts allow-same-origin" src="/template-asset/${esc(t.id)}/${esc(entry)}" loading="lazy"></iframe>`;
+    const inner = t.poster_url
+      ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(templateDisplayName(t) || t.id)}" loading="lazy" />`
+      : `<div class="poster-fallback"><span>${esc(templateDisplayName(t) || t.id)}</span></div>`;
     return `<div class="gallery-card${sel}" data-id="${t.id}">
       <div class="preview ${portrait ? 'portrait' : ''}" data-portrait="${portrait}">
         ${inner}
@@ -3317,12 +3881,16 @@ function openTemplatePreviewModal(tpl) {
     if (!state.selected) return;
     if (confirmBar) confirmBar.hidden = true;
     useBtn.disabled = true;
+    const shouldRestyleFrames = Array.isArray(state.selected.frames) && state.selected.frames.length > 0;
     try {
       await API.setTemplate(state.selected.id, tpl.id);
       closeTemplatePreviewModal();
       closeGallery();
       await selectProject(state.selected.id);
       toast(t('tpl_preview.applied', { name: templateDisplayName(tpl) || tpl.id }), 'success');
+      if (shouldRestyleFrames) {
+        void startTemplateRestyleStream(templateDisplayName(tpl) || tpl.id);
+      }
     } catch (e) {
       closeTemplatePreviewModal();
       closeGallery();
@@ -3338,14 +3906,22 @@ function openTemplatePreviewModal(tpl) {
     const current = state.selected.templateId;
     if (current && current !== tpl.id) {
       // Show the inline confirm bar instead of blocking confirm().
+      if (confirmBar && !confirmBar.hidden) {
+        doApply();
+        return;
+      }
       if (confirmMsg) confirmMsg.textContent = t('tpl_preview.replace_confirm', { name: templateDisplayName(tpl) || tpl.id });
       if (confirmBar) confirmBar.hidden = false;
+      useBtn.textContent = t('tpl_preview.confirm_yes');
       return;
     }
     doApply();
   };
   if (confirmYes) confirmYes.onclick = doApply;
-  if (confirmNo) confirmNo.onclick = () => { if (confirmBar) confirmBar.hidden = true; };
+  if (confirmNo) confirmNo.onclick = () => {
+    if (confirmBar) confirmBar.hidden = true;
+    useBtn.textContent = t('tpl_preview.use');
+  };
   cancelBtn.onclick = closeTemplatePreviewModal;
   closeBtn.onclick = closeTemplatePreviewModal;
 }

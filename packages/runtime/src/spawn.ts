@@ -105,6 +105,9 @@ export function spawnAgent(opts: SpawnOptions): SpawnHandle {
       const { resolveBin } = await import('./detect.js');
       const resolved = await resolveBin(def);
       if (resolved) command = resolved;
+      if (/\s/.test(command) && !/^".*"$/.test(command)) {
+        command = `"${command}"`;
+      }
     }
 
     const child = cpSpawn(command, args, {

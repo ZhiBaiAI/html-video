@@ -1101,12 +1101,14 @@ async function overlayTalkingHeadWithFfmpeg(args: {
   const runOverlay = (subtitlesPath?: string, label = 'talking-head overlay') => runFfmpeg([
     '-y',
     '-i', args.baseVideoPath,
+    '-stream_loop', '-1',
     '-i', args.talkingHeadPath,
     '-filter_complex', buildTalkingHeadOverlayFilter({ ...args, subtitlesPath }),
     '-map', '[vout]',
     '-c:v', 'libx264',
     '-pix_fmt', 'yuv420p',
     '-movflags', '+faststart',
+    '-shortest',
     args.outputPath,
   ], label);
 
