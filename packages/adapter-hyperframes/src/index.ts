@@ -15,3 +15,9 @@ const adapter: EngineAdapter = {
 
 export default adapter;
 export { adapter };
+export {
+  cachedChromiumExecutables,
+  playwrightBrowserCacheRoot,
+  shouldTrySystemBrowser,
+  systemBrowserChannels,
+} from './render.js';

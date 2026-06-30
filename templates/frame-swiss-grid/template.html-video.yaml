@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-swiss-grid
 name: Swiss Grid
+name_zh: "瑞士网格"
+description_zh: "克制网格和排版主导，适合企业汇报和理性标题。"
 description: >
   Structured grid layout
 
@@ -32,7 +34,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

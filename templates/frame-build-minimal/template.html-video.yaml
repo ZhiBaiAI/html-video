@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-build-minimal
 name: Build Minimal
+name_zh: "奢华极简"
+description_zh: "大留白、细字重和金色发丝线，适合高端产品与品牌主视觉。"
 description: >
   Luxury-minimal whitespace hero — a single word reveals letter by letter in ultra-thin
   Inter, a warm-gold hairline extends, thin indicators rise and breathe. Calm, premium,
@@ -32,6 +34,7 @@ output:
     type: variable
     min_sec: 4
     max_sec: 7
+    default_sec: 6
   alpha: false
   audio:
     supported: true

@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-warm-grain
 name: Warm Grain
+name_zh: "暖颗粒"
+description_zh: "温暖颗粒感杂志开场，适合生活方式和产品发布。"
 description: >
   Cream aesthetic with grain texture
 
@@ -32,7 +34,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

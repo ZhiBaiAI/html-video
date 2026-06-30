@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-broadside
-name: 工业大字报 · Broadside
+name: Broadside
 name_zh: 工业大字报
-description: >
+description_zh: >
   工业新闻纸海报感，墨黑底、粗粝米白字和火橙套准标记，适合安全、开发者、硬核技术发布。
-description_en: >
+description: >
   Industrial newsprint poster — raw cream on ink, Barlow display, fire-orange register
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

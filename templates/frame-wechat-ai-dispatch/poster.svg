@@ -1,0 +1,94 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1920" height="1080" fill="#F5F7F1"/>
+  <defs>
+    <pattern id="grid" width="72" height="72" patternUnits="userSpaceOnUse">
+      <path d="M72 0H0V72" stroke="#202521" stroke-opacity="0.055" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#142018" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+  <path d="M94 58H1826" stroke="#202521" stroke-width="3"/>
+  <path d="M94 856H1826" stroke="#202521" stroke-width="3"/>
+  <text x="94" y="124" fill="#202521" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="34" font-weight="700">微信 AI 生态 / 小程序分发重构</text>
+  <text x="1418" y="124" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="19" letter-spacing="4">DISTRIBUTION SYSTEM · 2026</text>
+  <rect x="94" y="190" width="1732" height="666" fill="#F7F9F5" fill-opacity="0.42" stroke="#202521" stroke-opacity="0.15" stroke-width="2"/>
+  <path d="M704 190V856" stroke="#202521" stroke-opacity="0.12" stroke-width="2"/>
+  <path d="M126 252H160" stroke="#159C63" stroke-width="4"/>
+  <text x="178" y="259" fill="#159C63" font-family="SF Mono, ui-monospace, monospace" font-size="20" font-weight="800" letter-spacing="2">02 / AI DISPATCH</text>
+  <text x="126" y="354" fill="#202521" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="64" font-weight="800">未来，AI</text>
+  <text x="126" y="424" fill="#159C63" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="64" font-weight="800">主动调度服务</text>
+  <text x="126" y="483" fill="#4F5751" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21">用户不再逐个搜索小程序，系统理解意图后，</text>
+  <text x="126" y="516" fill="#4F5751" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="21">自动筛选服务、补齐上下文，并把最佳结果推到前台。</text>
+  <rect x="126" y="550" width="408" height="72" rx="16" fill="white" fill-opacity="0.5" stroke="#202521" stroke-width="3" filter="url(#soft)"/>
+  <text x="156" y="596" fill="#202521" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="25" font-weight="700">“帮我完成一件事”</text>
+  <g font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif">
+    <rect x="126" y="644" width="510" height="54" fill="white" fill-opacity="0.32" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+    <path d="M232 644V698" stroke="#202521" stroke-opacity="0.12" stroke-width="2"/>
+    <text x="154" y="677" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="13" font-weight="800" letter-spacing="2">INTENT</text>
+    <text x="250" y="678" fill="#202521" font-size="19" font-weight="700">自然语言表达任务目标</text>
+    <rect x="126" y="706" width="510" height="54" fill="white" fill-opacity="0.32" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+    <path d="M232 706V760" stroke="#202521" stroke-opacity="0.12" stroke-width="2"/>
+    <text x="145" y="739" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="13" font-weight="800" letter-spacing="2">CONTEXT</text>
+    <text x="250" y="740" fill="#202521" font-size="19" font-weight="700">位置、时间、偏好自动参与匹配</text>
+    <rect x="126" y="768" width="510" height="54" fill="white" fill-opacity="0.32" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+    <path d="M232 768V822" stroke="#202521" stroke-opacity="0.12" stroke-width="2"/>
+    <text x="154" y="801" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="13" font-weight="800" letter-spacing="2">ACTION</text>
+    <text x="250" y="802" fill="#202521" font-size="19" font-weight="700">命中服务后直接进入履约路径</text>
+  </g>
+  <text x="784" y="257" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="18" font-weight="800" letter-spacing="2">SERVICE ROUTER / MATCH SCORE</text>
+  <path d="M1394 252H1418" stroke="#202521" stroke-opacity="0.18" stroke-width="3"/>
+  <text x="1428" y="258" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="14" letter-spacing="1">IDLE</text>
+  <path d="M1494 252H1518" stroke="#159C63" stroke-width="5"/>
+  <text x="1528" y="258" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="14" letter-spacing="1">MATCHED</text>
+  <circle cx="1657" cy="252" r="7" fill="#315F9F"/>
+  <text x="1674" y="258" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="14" letter-spacing="1">AI HUB</text>
+  <path d="M1070 395L888 275" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+  <path d="M1140 395L1362 270" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+  <path d="M1075 535L920 610" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+  <path d="M1142 535L1346 606" stroke="#202521" stroke-opacity="0.18" stroke-width="2"/>
+  <path d="M1198 468L1515 484" stroke="#159C63" stroke-width="5"/>
+  <circle cx="1108" cy="466" r="113" fill="#EDF6FF" stroke="#315F9F" stroke-width="5"/>
+  <circle cx="1108" cy="466" r="132" stroke="#315F9F" stroke-opacity="0.14" stroke-width="18"/>
+  <text x="1076" y="424" fill="#315F9F" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="22">微信</text>
+  <text x="1058" y="508" fill="#315F9F" font-family="Arial, sans-serif" font-size="66" font-weight="800">AI</text>
+  <g font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" filter="url(#soft)">
+    <rect x="778" y="237" width="205" height="128" fill="white" fill-opacity="0.5" stroke="#202521" stroke-opacity="0.22" stroke-width="3"/>
+    <text x="806" y="281" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="17" letter-spacing="2">SERVICE 01</text>
+    <text x="806" y="330" fill="#202521" font-size="38" font-weight="800">出行</text>
+    <rect x="1438" y="229" width="205" height="128" fill="white" fill-opacity="0.5" stroke="#202521" stroke-opacity="0.22" stroke-width="3"/>
+    <text x="1466" y="273" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="17" letter-spacing="2">SERVICE 02</text>
+    <text x="1466" y="322" fill="#202521" font-size="38" font-weight="800">酒店</text>
+    <rect x="814" y="610" width="205" height="128" fill="white" fill-opacity="0.5" stroke="#202521" stroke-opacity="0.22" stroke-width="3"/>
+    <text x="842" y="654" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="17" letter-spacing="2">SERVICE 05</text>
+    <text x="842" y="703" fill="#202521" font-size="38" font-weight="800">医疗</text>
+    <rect x="1390" y="602" width="205" height="128" fill="white" fill-opacity="0.5" stroke="#202521" stroke-opacity="0.22" stroke-width="3"/>
+    <text x="1418" y="646" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="17" letter-spacing="2">SERVICE 04</text>
+    <text x="1418" y="695" fill="#202521" font-size="38" font-weight="800">物流</text>
+    <rect x="1516" y="468" width="205" height="128" fill="#159C63" fill-opacity="0.12" stroke="#159C63" stroke-width="3"/>
+    <text x="1544" y="512" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="17" letter-spacing="2">MATCHED</text>
+    <text x="1544" y="561" fill="#202521" font-size="38" font-weight="800">餐饮</text>
+    <rect x="1518" y="626" width="212" height="54" fill="#159C63"/>
+    <text x="1546" y="661" fill="white" font-family="SF Mono, ui-monospace, monospace" font-size="18" font-weight="800" letter-spacing="3">AI SELECTED</text>
+  </g>
+  <g>
+    <path d="M784 780H1378" stroke="#202521" stroke-opacity="0.16" stroke-width="2"/>
+    <path d="M784 856H1378" stroke="#202521" stroke-opacity="0.16" stroke-width="2"/>
+    <path d="M982 780V856" stroke="#202521" stroke-opacity="0.12" stroke-width="2"/>
+    <path d="M1180 780V856" stroke="#202521" stroke-opacity="0.12" stroke-width="2"/>
+    <text x="806" y="829" fill="#159C63" font-family="SF Mono, ui-monospace, monospace" font-size="28" font-weight="800">01</text>
+    <text x="858" y="823" fill="#7C837D" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="16" font-weight="700">Intent parsed</text>
+    <text x="1004" y="829" fill="#159C63" font-family="SF Mono, ui-monospace, monospace" font-size="28" font-weight="800">05</text>
+    <text x="1056" y="823" fill="#7C837D" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="16" font-weight="700">Services ranked</text>
+    <text x="1202" y="829" fill="#159C63" font-family="SF Mono, ui-monospace, monospace" font-size="28" font-weight="800">1st</text>
+    <text x="1260" y="823" fill="#7C837D" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="16" font-weight="700">Best path selected</text>
+  </g>
+  <text x="126" y="882" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="14" letter-spacing="1">SOURCE: PRODUCT STRATEGY DRAFT</text>
+  <text x="460" y="882" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="14" letter-spacing="1">PAGE 02 / 06</text>
+  <text x="620" y="882" fill="#7C837D" font-family="SF Mono, ui-monospace, monospace" font-size="14" letter-spacing="1">STATUS: CONCEPT MODEL</text>
+  <text x="550" y="1000" fill="#7C837D" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="56" font-weight="800">搜索分发</text>
+  <text x="858" y="1000" fill="#202521" font-family="Arial, sans-serif" font-size="56">→</text>
+  <text x="972" y="1000" fill="#202521" font-family="Arial, sans-serif" font-size="56" font-weight="800">AI</text>
+  <text x="1062" y="1000" fill="#159C63" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="56" font-weight="800">调度</text>
+</svg>

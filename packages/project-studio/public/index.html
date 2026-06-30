@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>html-video · Studio</title>
+<title>html-video · 视频工作台</title>
 <link rel="stylesheet" href="/tokens.css?v=0.9-hyperframes" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -15,13 +15,17 @@
   html, body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
     height: 100vh; overflow: hidden; font-size: 13.5px; line-height: 1.5; }
   button, input, textarea, select { font-family: inherit; font-size: inherit; }
+  button { -webkit-tap-highlight-color: transparent; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible,
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   a { color: var(--accent); }
 
-  .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+  .app { display: grid; grid-template-rows: 60px 1fr; height: 100vh; }
 
   /* ===== Top toolbar ===== */
   .toolbar { background: var(--bg-panel); border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; gap: 18px; padding: 0 22px; min-width: 0; }
+    display: flex; align-items: center; gap: 12px; padding: 0 16px; min-width: 0;
+    overflow: hidden; box-shadow: var(--shadow-xs); }
   .toolbar .brand { display: flex; align-items: center; gap: 10px; padding-right: 14px;
     border-right: 1px solid var(--border); margin-right: 6px; }
   .toolbar .brand .logo { width: 28px; height: 28px; border-radius: var(--radius-sm);
@@ -31,16 +35,18 @@
   .toolbar .brand .v { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
   .toolbar .name-input { background: transparent; border: 0; color: var(--text);
     font-size: 14px; font-weight: 500; padding: 5px 8px; border-radius: var(--radius-sm);
-    width: 220px; outline: none; transition: background .12s; }
+    width: clamp(130px, 15vw, 220px); outline: none; transition: background .12s; }
   .toolbar .name-input:hover { background: var(--bg-subtle); }
 
-  .toolbar-section { display: flex; align-items: center; gap: 8px; }
+  .toolbar-section { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .sec-label { font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
     color: var(--text-muted); font-family: var(--font-mono); }
   .toolbar .pick-btn { background: var(--bg); border: 1px solid var(--border);
     color: var(--text); padding: 6px 12px; border-radius: var(--radius-sm);
     font-size: 12.5px; cursor: pointer; display: flex; align-items: center; gap: 6px;
-    min-width: 200px; transition: border-color .12s; }
+    min-width: 0; max-width: 220px; transition: border-color .12s; }
+  .toolbar .pick-btn .label { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
   .toolbar .pick-btn:hover:not(:disabled) { border-color: var(--accent); }
   .toolbar .pick-btn:disabled { opacity: .4; cursor: not-allowed; }
   .toolbar .pick-btn .arrow { color: var(--text-muted); }
@@ -112,19 +118,22 @@
     font-family: var(--font-mono); }
   .toolbar .agent-status.connected { background: var(--green-bg); color: var(--green); }
   .toolbar .agent-status.missing { background: var(--bg-subtle); color: var(--text-muted); }
-  .toolbar .grow { flex: 1; }
+  .toolbar .grow { flex: 1 1 auto; min-width: 8px; }
   .toolbar .export-btn { background: var(--accent); color: var(--accent-fg); border: 0;
-    padding: 8px 18px; border-radius: var(--radius-sm); font-weight: 500; cursor: pointer;
+    padding: 8px 14px; border-radius: var(--radius-sm); font-weight: 500; cursor: pointer;
     font-size: 12.5px; transition: background .15s;
-    box-shadow: inset 0 -1px 0 rgba(0,0,0,.08), 0 4px 10px rgba(201, 100, 66, .18); }
+    white-space: nowrap; flex: 0 0 auto;
+    box-shadow: inset 0 -1px 0 rgba(0,0,0,.08), 0 4px 10px rgba(60,230,172,.18); }
   .toolbar .export-btn:hover:not(:disabled) { background: var(--accent-hover); }
   .toolbar .export-btn:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
   /* One-click narrate-to-video — secondary, sits left of Export. */
   .toolbar .narrate-btn { background: var(--bg); border: 1px solid var(--accent);
-    color: var(--accent); padding: 7px 16px; border-radius: var(--radius-sm);
-    font-weight: 500; cursor: pointer; font-size: 12.5px; transition: all .15s; }
+    color: var(--accent); padding: 7px 11px; border-radius: var(--radius-sm);
+    font-weight: 500; cursor: pointer; font-size: 12.5px; transition: all .15s;
+    white-space: nowrap; flex: 0 0 auto; }
   .toolbar .narrate-btn:hover:not(:disabled) { background: var(--accent-soft); }
   .toolbar .narrate-btn:disabled { opacity: .35; cursor: not-allowed; }
+
   /* Settings modal */
   .settings-modal .modal.settings { width: min(880px, 92vw); height: min(620px, 88vh);
     padding: 0; display: flex; flex-direction: column; gap: 0; }
@@ -294,6 +303,31 @@
     transition: background .12s, height .12s; }
   .pane-resizer:hover::before,
   body.pane-resizing .pane-resizer::before { background: var(--accent); height: 64px; }
+
+  @media (max-width: 700px) {
+    .app { grid-template-rows: 56px 1fr; }
+    .toolbar { gap: 8px; padding: 0 10px; overflow-x: auto; }
+    .toolbar .brand { gap: 7px; padding-right: 8px; margin-right: 0; }
+    .toolbar .brand .v,
+    .toolbar .sec-label,
+    .toolbar .toolbar-links,
+    .toolbar .narrate-btn { display: none; }
+    .toolbar .brand h1 { font-size: 13px; }
+    .toolbar .name-input { width: 108px; flex: 0 0 108px; }
+    .toolbar .pick-btn { max-width: 132px; padding-inline: 9px; }
+    .toolbar .pick-btn.agent-pill { max-width: 96px; }
+    .toolbar .export-btn { padding-inline: 12px; }
+    .body { display: grid; grid-template-columns: 1fr;
+      grid-template-rows: minmax(360px, 45vh) minmax(420px, 1fr);
+      overflow-y: auto; }
+    .sidebar,
+    .text-pane { display: none; }
+    .chat-pane { grid-row: 1; border-right: 0; border-bottom: 1px solid var(--border); }
+    .right-pane { grid-row: 2; min-height: 420px; }
+    .chat-log { padding: 18px 18px 12px; }
+    .composer { padding: 10px 14px 14px; }
+    .composer textarea { min-height: 64px; }
+  }
 
   /* ===== Sidebar (Projects) ===== */
   .sidebar { background: var(--bg-panel); border-right: 1px solid var(--border);
@@ -508,7 +542,7 @@
     border-color: var(--accent); }
   .form-card .form-field .form-seg-btn.selected {
     background: var(--accent); border-color: var(--accent);
-    color: var(--accent-fg); box-shadow: 0 2px 6px rgba(201, 100, 66, .2); }
+    color: var(--accent-fg); box-shadow: 0 2px 6px rgba(60,230,172,.2); }
   .form-card .form-field .form-seg-btn:disabled { opacity: .55; cursor: not-allowed; }
   .form-card .form-attachments { margin-top: 12px; padding-top: 10px;
     border-top: 1px dashed var(--border); }
@@ -524,7 +558,7 @@
   .form-card .form-submit { background: var(--accent); color: var(--accent-fg);
     border: 0; padding: 7px 16px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 12.5px; font-weight: 500;
-    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: 0 4px 10px rgba(60,230,172,.18); }
   .form-card .form-submit:hover { background: var(--accent-hover); }
 
   /* ===== hv-confirm (start-or-edit card) ===== */
@@ -549,7 +583,7 @@
   .confirm-card .confirm-go { background: var(--accent); color: var(--accent-fg);
     border: 0; padding: 7px 14px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 12.5px; font-weight: 500; flex: 1;
-    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: 0 4px 10px rgba(60,230,172,.18); }
   .confirm-card .confirm-go:hover { background: var(--accent-hover); }
   .confirm-card .confirm-edit { background: var(--bg);
     border: 1px solid var(--border); color: var(--text);
@@ -637,8 +671,8 @@
   .composer .att-chip img { width: 18px; height: 18px; object-fit: cover;
     border-radius: 2px; background: var(--bg); }
   .composer textarea { width: 100%; background: transparent; border: 0; outline: none;
-    color: var(--text); resize: none; min-height: 40px; max-height: 220px;
-    padding: 4px 4px; line-height: 1.5; }
+    color: var(--text); resize: none; min-height: 74px; max-height: 220px;
+    padding: 4px 4px; line-height: 1.5; overflow-y: hidden; }
   .composer-controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
     border-top: 1px dashed var(--border); padding-top: 6px; }
   .composer-control { display: inline-flex; align-items: center; gap: 5px;
@@ -649,8 +683,10 @@
   .composer-control select:focus { outline: none; border-color: var(--accent); }
   .composer-control select:disabled { opacity: .45; cursor: not-allowed; }
   .composer .actions { display: flex; align-items: center; gap: 6px; }
+
   .composer .hint { font-size: 10.5px; color: var(--text-faint);
-    font-family: var(--font-mono); margin-right: auto; padding-left: 4px; }
+    font-family: var(--font-mono); margin-right: auto; padding-left: 4px;
+    line-height: 1.45; min-width: 0; }
   .composer .icon-btn { background: transparent; border: 0; color: var(--text-muted);
     cursor: pointer; padding: 4px 6px; border-radius: var(--radius-sm); font-size: 13px; }
   .composer .icon-btn:hover { color: var(--text); background: var(--bg-subtle); }
@@ -726,7 +762,7 @@
   .frames-strip button.frame-tab.active { border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-soft); }
   .frames-strip button.frame-tab.focus { border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(201, 100, 66, .25); }
+    box-shadow: 0 0 0 2px var(--accent), 0 4px 14px rgba(60,230,172,.25); }
   .frames-strip .frame-thumb .focus-mark { position: absolute; top: 4px;
     left: 4px; width: 22px; height: 22px; display: grid; place-items: center;
     background: var(--accent); color: var(--accent-fg); border-radius: 50%;
@@ -743,13 +779,14 @@
   .frames-strip button.frame-tab .frame-regenerate.busy { width: auto; min-width: 56px;
     padding: 0 8px; font-size: 10px; background: var(--accent); color: var(--accent-fg);
     cursor: default; animation: none; }
-  /* The actual mini render: iframe rendered at full size then transform-
-     scaled so a 1920×1080 page fits 178×100 (the 178 = 180 - 2px border). */
+  /* The actual mini render: iframe uses the project's native resolution and
+     is transform-scaled into the per-aspect thumbnail bounds set by app.js. */
+
   .frames-strip .frame-thumb { width: 178px; height: 100px; background: #000;
     overflow: hidden; position: relative; }
   .frames-strip .frame-thumb iframe { position: absolute; top: 0; left: 0;
-    width: 1920px; height: 1080px; border: 0;
-    transform: scale(calc(178 / 1920)); transform-origin: top left;
+    width: var(--thumb-native-width, 1920px); height: var(--thumb-native-height, 1080px); border: 0;
+    transform: scale(var(--thumb-scale, calc(178 / 1920))); transform-origin: top left;
     pointer-events: none; }
   /* Native (enhanced) frame plays a rendered MP4 instead of an HTML iframe. */
   .frames-strip .frame-thumb video { position: absolute; top: 0; left: 0;
@@ -768,7 +805,7 @@
     animation: hvEnhancePulse 1.8s ease-in-out infinite; }
   @keyframes hvEnhancePulse {
     0%,100% { box-shadow: 0 2px 8px rgba(0,0,0,.45); }
-    50% { box-shadow: 0 0 0 4px rgba(255,90,44,.35), 0 2px 8px rgba(0,0,0,.45); } }
+    50% { box-shadow: 0 0 0 4px rgba(60,230,172,.32), 0 2px 8px rgba(0,0,0,.45); } }
   .frames-strip button.frame-tab .frame-enhance:hover { filter: brightness(1.12);
     transform: translateX(-50%) scale(1.04); }
   .frames-strip button.frame-tab .frame-enhance.on { background: rgba(20,20,24,.82);
@@ -987,7 +1024,7 @@
      after the section split these rendered as unstyled grey defaults. */
   .st-generate { background: var(--accent); color: var(--accent-fg);
     border: 0; padding: 7px 16px; border-radius: var(--radius-sm); cursor: pointer;
-    font-size: 12.5px; font-weight: 500; box-shadow: 0 4px 10px rgba(201, 100, 66, .18);
+    font-size: 12.5px; font-weight: 500; box-shadow: 0 4px 10px rgba(60,230,172,.18);
     transition: background .12s; }
   .st-generate:hover:not(:disabled) { background: var(--accent-hover); }
   .st-generate:disabled,
@@ -1008,7 +1045,8 @@
   .talking-audio-row select { min-width: 142px; }
   .talking-preview { display: flex; flex-direction: column; gap: 8px; }
   .talking-source { display: grid; grid-template-columns: 120px 1fr; gap: 10px; align-items: center; }
-  .talking-source video { width: 120px; aspect-ratio: 16/9; background: #000;
+  .talking-source video,
+  .talking-source img { width: 120px; aspect-ratio: 16/9; background: #000;
     border-radius: var(--radius-sm); object-fit: cover; }
   .talking-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .talking-meta b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1025,10 +1063,10 @@
   .toast.error { border-color: var(--red); color: var(--red); }
 
   /* ===== Modal: gallery ===== */
-  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: none;
+  .modal-bg { position: fixed; inset: 0; background: rgba(10,10,10,.48); display: none;
     align-items: center; justify-content: center; z-index: 100; }
   .modal-bg.show { display: flex; }
-  .modal { background: var(--bg-elevated); box-shadow: var(--shadow-lg);
+  .modal { background: var(--bg-elevated); box-shadow: var(--shadow-lg); border: 1px solid var(--border);
     border-radius: var(--radius-lg); padding: 24px; width: 92vw; max-width: 1200px;
     max-height: 86vh; display: flex; flex-direction: column; }
   .modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -1075,13 +1113,24 @@
   .gallery-card .preview img.poster { position: absolute; inset: 0;
     width: 100%; height: 100%; object-fit: cover; display: block; }
   .gallery-card .preview .poster-fallback { position: absolute; inset: 0;
-    display: grid; place-items: center; padding: 18px; background: var(--bg-subtle);
-    color: var(--text-muted); text-align: center; font-size: 12px; line-height: 1.4; }
-  .gallery-card .preview .poster-fallback span { max-width: 100%; overflow-wrap: anywhere; }
+    display: grid; place-items: center; align-content: center; gap: 8px;
+    background: linear-gradient(135deg, var(--bg-subtle), var(--bg-panel));
+    color: var(--text-muted); padding: 18px; text-align: center; }
+  .gallery-card .preview .poster-fallback span { font-family: var(--font-mono);
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase; }
+  .gallery-card .preview .poster-fallback b { color: var(--text); font-size: 15px;
+    font-weight: 600; line-height: 1.25; }
+  .gallery-card .card-actions { display: flex; justify-content: flex-end; padding: 0 14px 13px; }
+  .gallery-card .preview-btn { display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border-strong, var(--border)); background: var(--bg-subtle);
+    color: var(--text); border-radius: var(--radius-sm); padding: 6px 11px;
+    font: 600 11.5px var(--font-sans); cursor: pointer; transition: all .12s; }
+  .gallery-card .preview-btn:hover { border-color: var(--accent); color: var(--accent); }
+
 
   /* ===== Template fullscreen preview (the "confirm before applying" modal) ===== */
   .tpl-preview-modal { z-index: 1100; }
-  .tpl-preview-modal .modal { width: min(1240px, 96vw); height: min(840px, 92vh);
+  .tpl-preview-modal .modal { width: min(1320px, 96vw); height: min(880px, 92vh);
     padding: 0; display: flex; flex-direction: column; gap: 0; }
   .tpl-preview-head { display: flex; align-items: center; gap: 14px;
     padding: 14px 18px; border-bottom: 1px solid var(--border); }
@@ -1092,20 +1141,36 @@
     color: var(--text-muted); font-size: 16px; cursor: pointer; padding: 4px 8px;
     border-radius: var(--radius-sm); }
   .tpl-preview-head .modal-close:hover { color: var(--text); background: var(--bg-subtle); }
-  .tpl-preview-stage { flex: 1; background: #000; padding: 22px;
-    display: flex; align-items: flex-start; justify-content: center;
-    overflow: auto; }
-  .tpl-preview-frame { aspect-ratio: 16/9; background: #000; position: relative;
-    width: 100%; max-width: 100%; flex: 0 0 auto; border-radius: var(--radius);
-    overflow: hidden; }
-  .tpl-preview-frame.portrait { aspect-ratio: 9/16; max-width: none;
-    width: min(46%, 420px); }
-  .tpl-preview-frame iframe { position: absolute; top: 0; left: 0;
-    width: 1920px; height: 1080px; border: 0;
-    transform: scale(var(--tpl-preview-scale, 1)); transform-origin: top left; }
-  .tpl-preview-frame.portrait iframe { width: 1080px; height: 1920px; }
-  .tpl-preview-frame img.poster { position: absolute; inset: 0; width: 100%;
-    height: 100%; object-fit: contain; background: #000; }
+  .tpl-preview-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 250px;
+    background: var(--bg); overflow: hidden; }
+  .tpl-preview-samples-wrap { min-width: 0; display: flex; flex-direction: column;
+    padding: 18px; overflow: hidden; border-right: 1px solid var(--border); }
+  .tpl-preview-section-head { display: flex; justify-content: space-between; gap: 16px;
+    align-items: flex-start; margin-bottom: 14px; }
+  .tpl-preview-section-head h3, .tpl-preview-guide h3 { margin: 0; font-size: 12.5px; font-weight: 650; }
+  .tpl-preview-section-head p { margin: 4px 0 0; color: var(--text-muted); font-size: 11.5px; }
+  .tpl-preview-samples { min-height: 0; overflow: auto; display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-content: start; padding: 1px 3px 10px 1px; }
+  .tpl-sample { margin: 0; background: var(--bg-panel); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+  .tpl-sample-canvas { position: relative; padding-top: 56.25%; overflow: hidden; background: #080808; }
+  .tpl-sample-canvas iframe { position: absolute; top: 0; left: 0; width: 1920px; height: 1080px;
+    border: 0; pointer-events: none; transform: scale(var(--tpl-sample-scale, .25)); transform-origin: top left; }
+  .tpl-sample-canvas.portrait iframe { width: 1080px; height: 1920px; left: 50%;
+    transform: translateX(-50%) scale(var(--tpl-sample-scale, .18)); transform-origin: top center; }
+  .tpl-sample-canvas img { position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; background: #080808; }
+  .tpl-sample figcaption { display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; min-height: 38px; padding: 9px 11px; color: var(--text-muted); font-size: 11.5px; }
+  .tpl-sample figcaption b { color: var(--text); font-weight: 600; text-transform: capitalize; }
+  .tpl-sample figcaption span { font-family: var(--font-mono); font-size: 9.5px; letter-spacing: .08em; }
+  .tpl-preview-guide { padding: 20px 18px; overflow: auto; background: var(--bg-panel);
+    display: flex; flex-direction: column; gap: 24px; }
+  .tpl-preview-guide section { display: flex; flex-direction: column; gap: 11px; }
+  .tpl-preview-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .tpl-preview-chips span { padding: 5px 8px; border-radius: var(--radius-pill);
+    background: var(--bg-subtle); border: 1px solid var(--border); color: var(--text-muted); font-size: 10.5px; }
+  .tpl-preview-chips.motion span { background: var(--accent-soft); border-color: rgba(60,230,172,.24); color: var(--text); }
   .tpl-preview-source { padding: 11px 18px; border-top: 1px solid var(--border);
     background: var(--bg-panel); font-size: 12px; line-height: 1.5;
     color: var(--text-dim, #8a8a8a); display: flex; flex-direction: column; gap: 3px; }
@@ -1130,14 +1195,15 @@
   .tpl-preview-foot button:hover { border-color: var(--accent); }
   .tpl-preview-foot button.primary { background: var(--accent);
     border-color: var(--accent); color: var(--accent-fg); font-weight: 500;
-    box-shadow: 0 4px 10px rgba(201, 100, 66, .18); }
+    box-shadow: 0 4px 10px rgba(60,230,172,.18); }
   .tpl-preview-foot button.primary:hover { background: var(--accent-hover); }
   .tpl-preview-foot .meta { font-size: 11.5px; color: var(--text-muted);
     font-family: var(--font-mono); }
   /* Inline confirm bar (replaces blocking confirm() dialog) */
   .tpl-preview-confirm-bar { padding: 10px 18px; border-top: 1px solid var(--accent);
-    background: var(--accent-soft, rgba(201,100,66,.08)); display: flex;
+    background: var(--accent-soft, rgba(60,230,172,.10)); display: flex;
     gap: 10px; align-items: center; justify-content: flex-end; }
+  .tpl-preview-confirm-bar[hidden] { display: none !important; }
   .tpl-preview-confirm-bar .tpl-preview-confirm-msg { flex: 1; font-size: 12.5px;
     color: var(--text); }
   .tpl-preview-confirm-bar button { background: var(--bg-subtle);
@@ -1148,6 +1214,17 @@
   .tpl-preview-confirm-bar button.primary { background: var(--accent);
     border-color: var(--accent); color: var(--accent-fg); font-weight: 500; }
   .tpl-preview-confirm-bar button.primary:hover { background: var(--accent-hover); }
+  @media (max-width: 840px) {
+    .tpl-preview-modal .modal { width: 96vw; height: 94vh; }
+    .tpl-preview-body { grid-template-columns: 1fr; overflow: auto; }
+    .tpl-preview-samples-wrap { overflow: visible; border-right: 0; border-bottom: 1px solid var(--border); }
+    .tpl-preview-samples { overflow: visible; grid-template-columns: 1fr; }
+    .tpl-preview-guide { overflow: visible; }
+  }
+  .chat-empty .empty-action { background: var(--accent); border: 1px solid var(--accent);
+    color: var(--accent-fg); border-radius: var(--radius-sm); padding: 7px 12px;
+    font: inherit; font-size: 12px; cursor: pointer; }
+  .chat-empty .empty-action:hover { background: var(--accent-hover); }
   .gallery-card .meta { padding: 12px 14px; flex: 0 0 auto; }
   .gallery-card .meta .name { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
   .gallery-card .meta .desc { font-size: 11.5px; color: var(--text-muted);
@@ -1176,6 +1253,37 @@
   .small-modal button.primary { background: var(--accent); color: var(--accent-fg);
     border-color: var(--accent); font-weight: 500; }
   .small-modal button.primary:hover { background: var(--accent-hover); }
+
+  /* Shared control rhythm: primary/secondary actions use the same height,
+     corner radius, focus behavior and press feedback across all panels. */
+  .toolbar .export-btn, .toolbar .narrate-btn, .new-project,
+  .composer .send-btn, .small-modal button, .modal-close,
+  .tpl-preview-foot button, .tpl-preview-confirm-bar button,
+  .narrate-foot .primary { min-height: 34px; border-radius: 10px; }
+  .toolbar button:active:not(:disabled), .composer button:active:not(:disabled),
+  .modal button:active:not(:disabled) { transform: translateY(1px); }
+
+  .soundtrack-panel > summary,
+  .talking-panel > summary { background: var(--bg-subtle); border-style: solid;
+    border-color: var(--border); }
+  .soundtrack-panel > summary:hover,
+  .talking-panel > summary:hover { background: var(--accent-soft); border-color: var(--accent); }
+  .soundtrack-panel > summary:hover .st-summary-main,
+  .soundtrack-panel > summary:hover .st-summary-sub,
+  .talking-panel > summary:hover .st-summary-main,
+  .talking-panel > summary:hover .st-summary-sub { color: var(--text); }
+  .soundtrack-panel > summary:hover::after,
+  .talking-panel > summary:hover::after { color: var(--accent); }
+
+  @media (max-width: 700px) {
+    .sidebar,
+    .text-pane { display: none; }
+    .toolbar .icon-btn-toolbar {
+      display: inline-flex;
+      flex: 0 0 34px;
+      width: 34px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -1193,14 +1301,15 @@
     <input class="name-input" id="proj-name" data-i18n-attr="placeholder:app.no_project" disabled />
 
     <div class="grow"></div>
+
   </header>
 
   <div class="body" id="body">
     <aside class="sidebar">
       <div class="sidebar-head">
-        <h2>Projects</h2>
-        <button class="new-project" id="btn-new">+ New</button>
-        <button class="sidebar-toggle" id="btn-sidebar-toggle" title="Collapse sidebar">‹</button>
+        <h2 data-i18n="sidebar.projects">项目</h2>
+        <button class="new-project" id="btn-new" data-i18n="sidebar.new">+ 新建</button>
+        <button class="sidebar-toggle" id="btn-sidebar-toggle" data-i18n-attr="title:sidebar.collapse,aria-label:sidebar.collapse" title="收起侧栏" aria-label="收起侧栏">‹</button>
       </div>
       <div class="project-list" id="project-list"></div>
       <div class="sidebar-foot">
@@ -1213,8 +1322,8 @@
     <div class="empty-state">
       <div>
         <div class="ico">🎬</div>
-        <h2>Pick or create a project</h2>
-        <p>Each project = one HTML video. Choose a template to see the visual baseline, chat with your agent to drive the content, edit per-frame text in the middle column, see the result on the right.</p>
+        <h2 data-i18n="app.empty_pick_create">挑一个项目或新建</h2>
+        <p data-i18n="app.empty_subtitle">每个项目对应一个 HTML 视频。选择模板、描述内容并逐帧调整，右侧实时查看结果。</p>
       </div>
     </div>
   </div>
@@ -1290,18 +1399,34 @@
     <div class="tpl-preview-head">
       <div class="name" id="tpl-preview-name">—</div>
       <div class="desc" id="tpl-preview-desc"></div>
-      <button class="modal-close" id="tpl-preview-close" aria-label="Close">✕</button>
+      <button class="modal-close" id="tpl-preview-close" data-i18n-attr="aria-label:tpl_preview.cancel" aria-label="取消">✕</button>
     </div>
-    <div class="tpl-preview-stage">
-      <div class="tpl-preview-frame" id="tpl-preview-frame">
-        <iframe id="tpl-preview-iframe" sandbox="allow-scripts allow-same-origin" src="about:blank"></iframe>
-        <img id="tpl-preview-poster" class="poster" alt="" hidden />
-      </div>
+    <div class="tpl-preview-body">
+      <section class="tpl-preview-samples-wrap">
+        <div class="tpl-preview-section-head">
+          <div>
+            <h3 data-i18n="tpl_preview.samples">内置样例帧</h3>
+            <p data-i18n="tpl_preview.samples_hint">仅展示静态关键帧，不播放动画或视频。</p>
+          </div>
+        </div>
+        <div class="tpl-preview-samples" id="tpl-preview-samples"></div>
+      </section>
+      <aside class="tpl-preview-guide">
+        <section>
+          <h3 data-i18n="tpl_preview.elements">内容元素</h3>
+          <div class="tpl-preview-chips" id="tpl-preview-elements"></div>
+        </section>
+        <section>
+          <h3 data-i18n="tpl_preview.motion">动效语言</h3>
+          <div class="tpl-preview-chips motion" id="tpl-preview-motion"></div>
+        </section>
+      </aside>
     </div>
     <div class="tpl-preview-source" id="tpl-preview-source" hidden></div>
     <div class="tpl-preview-confirm-bar" id="tpl-preview-confirm-bar" hidden>
       <span class="tpl-preview-confirm-msg" id="tpl-preview-confirm-msg"></span>
       <button class="primary" id="tpl-preview-confirm-yes" data-i18n="tpl_preview.confirm_yes">Replace</button>
+      <button class="primary" id="tpl-preview-confirm-restyle" data-i18n="tpl_preview.confirm_restyle">Replace & restyle</button>
       <button id="tpl-preview-confirm-no" data-i18n="tpl_preview.confirm_no">No, keep current</button>
     </div>
     <div class="tpl-preview-foot">
@@ -1317,7 +1442,7 @@
   <div class="modal settings">
     <div class="settings-head">
       <h2 data-i18n="settings.title">Settings</h2>
-      <button class="modal-close" id="settings-close" aria-label="Close">✕</button>
+      <button class="modal-close" id="settings-close" data-i18n-attr="aria-label:settings.close" aria-label="关闭">✕</button>
     </div>
     <div class="settings-body">
       <nav class="settings-nav">
@@ -1343,6 +1468,6 @@
   </div>
 </div>
 
-<script type="module" src="/app.js?v=0.12-talking-audio-mode"></script>
+<script type="module" src="/app.js?v=0.15-zh-default"></script>
 </body>
 </html>

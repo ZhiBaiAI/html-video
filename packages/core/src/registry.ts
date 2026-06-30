@@ -55,8 +55,10 @@ export class TemplateRegistry {
 
   async scan(rootDir: string): Promise<TemplateMetadata[]> {
     if (!existsSync(rootDir)) return [];
+    this.templates.clear();
     const entries = await readdir(rootDir, { withFileTypes: true });
     const found: TemplateMetadata[] = [];
+    const seen = new Set<string>();
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const dir = join(rootDir, entry.name);
@@ -64,6 +66,17 @@ export class TemplateRegistry {
       if (!existsSync(yamlPath)) continue;
       const raw = await readFile(yamlPath, 'utf8');
       const meta = parseYaml(raw) as TemplateMetadata;
+      const errors = validateTemplateMetadata(meta, dir, entry.name);
+      if (errors.length > 0) {
+        throw new HtmlVideoError(
+          'template-invalid',
+          `Template metadata invalid at ${yamlPath}: ${errors.join('; ')}`,
+        );
+      }
+      if (seen.has(meta.id)) {
+        throw new HtmlVideoError('template-invalid', `Duplicate template id "${meta.id}"`);
+      }
+      seen.add(meta.id);
       meta.__dir = dir;
       this.templates.set(meta.id, meta);
       found.push(meta);
@@ -95,8 +108,7 @@ export class TemplateRegistry {
     top?: number;
   }): { template: TemplateMetadata; score: number; reason: string }[] {
     const top = opts.top ?? 5;
-    const intentLower = (opts.intent ?? '').toLowerCase();
-    const intentTokens = intentLower.split(/\W+/).filter((s) => s.length > 2);
+    const intentTokens = expandIntentTokens(opts.intent ?? '');
 
     const ranked: { template: TemplateMetadata; score: number; reason: string }[] = [];
 
@@ -104,23 +116,44 @@ export class TemplateRegistry {
       const reasonParts: string[] = [];
       let score = 0;
 
-      const haystack = [
-        ...t.tags,
-        ...t.best_for,
-        t.name,
-        t.name_zh ?? '',
-        t.description,
-        t.description_zh ?? '',
-        t.description_en ?? '',
-        t.category,
-        t.subcategory ?? '',
-      ]
-        .join(' ')
-        .toLowerCase();
-      const matched = intentTokens.filter((tok) => haystack.includes(tok));
-      if (matched.length > 0) {
-        score += matched.length * 0.2;
-        reasonParts.push(`matched ${matched.length} intent tokens`);
+      if (intentTokens.length > 0) {
+        const weightedFields: Array<[string, number]> = [
+          [[...t.tags, t.category, t.subcategory ?? ''].join(' '), 0.26],
+          [t.best_for.join(' '), 0.3],
+          [[t.name, t.name_zh].join(' '), 0.18],
+          [[t.description, t.description_zh].join(' '), 0.18],
+          [t.engine, 0.08],
+        ];
+        const matched = new Set<string>();
+        for (const token of intentTokens) {
+          for (const [field, weight] of weightedFields) {
+            if (normaliseSearchText(field).includes(token)) {
+              score += weight;
+              matched.add(token);
+              break;
+            }
+          }
+        }
+        if (matched.size > 0) {
+          reasonParts.push(`matched ${matched.size} intent signals`);
+        }
+
+        // Intent-level nudges for common video requests where exact tokens
+        // often won't appear in manifest prose.
+        const intent = normaliseSearchText(opts.intent ?? '');
+        if (/\b(star|stars|github|repo|metric|metrics|kpi|chart|data|growth)\b/.test(intent)) {
+          if (t.category === 'data-viz') {
+            score += 0.25;
+            reasonParts.push('data intent boost');
+          }
+          if (t.tags.some((tag) => /data|chart|metric|graph|kpi/i.test(tag))) {
+            score += 0.1;
+          }
+        }
+        if (/\b(product|launch|promo|marketing|saas|demo)\b/.test(intent) && /product|marketing|promo/.test(t.category)) {
+          score += 0.18;
+          reasonParts.push('product intent boost');
+        }
       }
 
       if (opts.aspect) {
@@ -153,6 +186,129 @@ export class TemplateRegistry {
     ranked.sort((a, b) => b.score - a.score);
     return ranked.slice(0, top);
   }
+}
+
+function validateTemplateMetadata(meta: TemplateMetadata, dir: string, dirname: string): string[] {
+  const errors: string[] = [];
+  const reqString = (key: keyof TemplateMetadata) => {
+    if (typeof meta[key] !== 'string' || String(meta[key]).trim() === '') {
+      errors.push(`${String(key)} must be a non-empty string`);
+    }
+  };
+  if (meta.spec_version !== 1) errors.push('spec_version must be 1');
+  reqString('id');
+  reqString('name');
+  reqString('name_zh');
+  reqString('description');
+  reqString('description_zh');
+  reqString('engine');
+  reqString('engine_version');
+  reqString('source_entry');
+  reqString('category');
+  reqString('version');
+  if (meta.id && meta.id !== dirname) {
+    errors.push(`id "${meta.id}" must match directory "${dirname}"`);
+  }
+  if (!Array.isArray(meta.tags)) errors.push('tags must be an array');
+  if (!Array.isArray(meta.best_for) || meta.best_for.length === 0) {
+    errors.push('best_for must be a non-empty array');
+  }
+  if (!meta.output?.formats?.length) errors.push('output.formats must be a non-empty array');
+  if (!meta.output?.default_format) errors.push('output.default_format is required');
+  if (meta.output?.default_format && !meta.output.formats?.includes(meta.output.default_format)) {
+    errors.push('output.default_format must be listed in output.formats');
+  }
+  if (!meta.output?.resolution?.default?.width || !meta.output?.resolution?.default?.height) {
+    errors.push('output.resolution.default width/height are required');
+  }
+  if (!Array.isArray(meta.output?.resolution?.supported_aspects)) {
+    errors.push('output.resolution.supported_aspects must be an array');
+  } else if (meta.output?.resolution?.default?.width && meta.output?.resolution?.default?.height) {
+    const { width, height } = meta.output.resolution.default;
+    const divisor = greatestCommonDivisor(width, height);
+    const defaultAspect = `${width / divisor}:${height / divisor}`;
+    if (!meta.output.resolution.supported_aspects.includes(defaultAspect)) {
+      errors.push(`output.resolution default aspect ${defaultAspect} must be listed in supported_aspects`);
+    }
+  }
+  if (!meta.output?.fps?.default || !Array.isArray(meta.output?.fps?.supported)) {
+    errors.push('output.fps default/supported are required');
+  } else if (!meta.output.fps.supported.includes(meta.output.fps.default)) {
+    errors.push('output.fps.default must be listed in output.fps.supported');
+  }
+  const duration = meta.output?.duration;
+  if (!duration || !Number.isFinite(duration.min_sec) || !Number.isFinite(duration.max_sec)
+    || !Number.isFinite(duration.default_sec)) {
+    errors.push('output.duration min_sec/max_sec/default_sec are required');
+  } else {
+    if (!['fixed', 'variable'].includes(duration.type)) errors.push('output.duration.type must be fixed or variable');
+    if (duration.min_sec <= 0 || duration.min_sec > duration.max_sec) {
+      errors.push('output.duration range is invalid');
+    }
+    if (duration.default_sec < duration.min_sec || duration.default_sec > duration.max_sec) {
+      errors.push('output.duration.default_sec must be inside the supported range');
+    }
+    if (duration.type === 'fixed' && (duration.min_sec !== duration.max_sec || duration.default_sec !== duration.min_sec)) {
+      errors.push('fixed output.duration must use the same min_sec/max_sec/default_sec');
+    }
+  }
+  if (!meta.output?.audio || !Array.isArray(meta.output.audio.expected_inputs)) {
+    errors.push('output.audio.expected_inputs must be an array');
+  }
+  if (!meta.inputs?.schema || typeof meta.inputs.schema !== 'object') {
+    errors.push('inputs.schema is required');
+  }
+  if (!Array.isArray(meta.inputs?.examples)) errors.push('inputs.examples must be an array');
+  if (!meta.license?.spdx) errors.push('license.spdx is required');
+  if (!meta.author?.name) errors.push('author.name is required');
+  if (!meta.preview?.poster) errors.push('preview.poster is required');
+  if (meta.source_entry && !existsSync(join(dir, meta.source_entry))) {
+    errors.push(`source_entry not found: ${meta.source_entry}`);
+  }
+  if (meta.native && !meta.native.compositionId) {
+    errors.push('native.compositionId is required when native is set');
+  }
+  return errors;
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y !== 0) [x, y] = [y, x % y];
+  return x || 1;
+}
+
+function normaliseSearchText(text: string): string {
+  return text.toLowerCase().replace(/[×·・]/g, ' ').replace(/[_-]/g, ' ');
+}
+
+function expandIntentTokens(intent: string): string[] {
+  const base = normaliseSearchText(intent)
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((s) => s.length > 1);
+  const synonyms: Record<string, string[]> = {
+    github: ['repo', 'repository', 'open source', 'stars'],
+    repo: ['github', 'repository', 'open source'],
+    stars: ['star', 'github', 'metric', 'data', 'chart'],
+    star: ['stars', 'github', 'metric', 'data', 'chart'],
+    metric: ['metrics', 'kpi', 'data', 'chart'],
+    metrics: ['metric', 'kpi', 'data', 'chart'],
+    growth: ['data', 'chart', 'metric'],
+    kpi: ['metric', 'data', 'chart'],
+    graph: ['chart', 'data'],
+    chart: ['graph', 'data'],
+    数据: ['data', 'chart', 'metric'],
+    图表: ['chart', 'graph', 'data'],
+    指标: ['metric', 'kpi', 'data'],
+    增长: ['growth', 'data', 'chart'],
+  };
+  const out = new Set(base);
+  for (const token of base) {
+    for (const s of synonyms[token] ?? []) {
+      for (const part of normaliseSearchText(s).split(/\s+/).filter(Boolean)) out.add(part);
+    }
+  }
+  return [...out];
 }
 
 // ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-capsule
-name: 胶囊编辑部 · Capsule
+name: Capsule
 name_zh: 胶囊编辑部
-description: >
+description_zh: >
   胶囊形编辑布局，奶油纸面、糖果色和 Bodoni Moda 衬线标题，适合生活方式、创意品牌和轻奢内容。
-description_en: >
+description: >
   Pill-shaped editorial — cream paper, candy palette, Bodoni Moda serif headlines
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

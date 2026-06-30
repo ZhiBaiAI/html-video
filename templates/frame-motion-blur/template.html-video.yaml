@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-motion-blur
 name: Motion Blur
+name_zh: "运动模糊"
+description_zh: "速度分层与拖影展示，适合解释运动、速度和转场技术。"
 description: >
   A Hyperframes velocity showcase demonstrating motion blur across shape and
   text rows. Five speed bands move from slow drift to extreme warp, using SVG
@@ -34,7 +36,7 @@ output:
     max_sec: 4
     default_sec: 4
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

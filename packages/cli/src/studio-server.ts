@@ -4,13 +4,14 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, copyFile, mkdir } from 'node:fs/promises';
+import { readFile, copyFile, mkdir, readdir } from 'node:fs/promises';
 import { existsSync, statSync } from 'node:fs';
-import { dirname, extname, join, resolve, basename } from 'node:path';
+import { dirname, extname, join, resolve, basename, posix, win32 } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import type { CliContext } from './context.js';
+import type { Project, TemplateMetadata } from '@html-video/core';
 import {
   AssetStore,
   cloneBailianCosyVoice,
@@ -63,6 +64,17 @@ function resolveUiRoot(): string {
   ];
   for (const c of candidates) if (existsSync(c)) return c;
   return candidates[0]!;
+}
+
+/** Cross-platform containment check; avoids hard-coding '/' on Windows. */
+export function isPathInside(
+  root: string,
+  candidate: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  const pathApi = platform === 'win32' ? win32 : posix;
+  const rel = pathApi.relative(pathApi.resolve(root), pathApi.resolve(candidate));
+  return rel === '' || (!rel.startsWith(`..${pathApi.sep}`) && rel !== '..' && !pathApi.isAbsolute(rel));
 }
 
 export async function startStudioServer(ctx: CliContext, port: number): Promise<StudioHandle> {
@@ -126,7 +138,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       // List engines + templates
       if (url.pathname === '/api/templates' && m === 'GET') {
         return json(res, 200, {
-          templates: ctx.templates.list().map((t) => {
+          templates: await Promise.all(ctx.templates.list().map(async (t) => {
             // Decide how the gallery should preview this template:
             //  - 'iframe'  → the entry HTML is self-contained; render it live.
             //  - 'poster'  → the entry only references sub-compositions via
@@ -134,13 +146,13 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             //    built, v0.9) to show anything, so a live iframe is blank.
             //    Fall back to the shipped poster image instead.
             const { mode, posterUrl } = templatePreviewMode(t);
+            const staticPreview = await templateStaticPreview(t, posterUrl);
             return {
               id: t.id,
               name: t.name,
               name_zh: t.name_zh,
               description: t.description,
               description_zh: t.description_zh,
-              description_en: t.description_en,
               engine: t.engine,
               source_entry: t.source_entry,
               category: t.category,
@@ -153,9 +165,12 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               preview: t.preview,
               preview_mode: mode,
               poster_url: posterUrl,
+              preview_frames: staticPreview.frames,
+              preview_elements: staticPreview.elements,
+              preview_motion: staticPreview.motion,
               output: t.output,
             };
-          }),
+          })),
         });
       }
 
@@ -201,9 +216,9 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return json(res, 200, { project });
       }
 
-      // Talking-head source video: upload or bind an existing video asset.
-      // When original-audio mode is enabled, export overlays the source video
-      // bottom-right and uses its audio as the final audio track.
+      // Talking-head source media: upload or bind an existing video/image asset.
+      // Videos can be transcribed and optionally provide original audio; images
+      // and GIFs are overlaid bottom-right as a speaking avatar.
       const thMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/talking-head$/);
       if (thMatch && thMatch[1] && m === 'POST') {
         const projectId = thMatch[1];
@@ -212,12 +227,13 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           let videoAssetId = '';
           if (ct.startsWith('multipart/form-data')) {
             const saved = await receiveMultipartFile(req, ct);
-            if (AssetStore.guessMime(saved.filePath).type !== 'video') {
-              return json(res, 400, { error: 'Upload a video file for talking-head mode.' });
+            const guessed = AssetStore.guessMime(saved.filePath);
+            if (guessed.type !== 'video' && guessed.type !== 'image') {
+              return json(res, 400, { error: 'Upload a video, GIF, or image file for talking-head mode.' });
             }
             const project = await ctx.orchestrator.addFileAsset(projectId, saved.filePath, 'talking-head source');
             const asset = project.assets[project.assets.length - 1];
-            if (!asset || asset.type !== 'video') return json(res, 400, { error: 'Upload a video file for talking-head mode.' });
+            if (!asset || (asset.type !== 'video' && asset.type !== 'image')) return json(res, 400, { error: 'Upload a video, GIF, or image file for talking-head mode.' });
             videoAssetId = asset.id;
           } else {
             const body = await readBody(req);
@@ -260,7 +276,11 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           };
           const project = await ctx.orchestrator.load(projectId);
           const videoAssetId = body.videoAssetId || project.talkingHead?.videoAssetId;
-          if (!videoAssetId) return json(res, 400, { error: 'No talking-head video selected.' });
+          if (!videoAssetId) return json(res, 400, { error: 'No talking-head source selected.' });
+          const asset = project.assets.find((a) => a.id === videoAssetId);
+          if (!asset || asset.type !== 'video') {
+            return json(res, 400, { error: 'Only uploaded videos can be transcribed. GIFs/images are overlay-only.' });
+          }
           const out = await ctx.orchestrator.transcribeTalkingHead({
             projectId,
             videoAssetId,
@@ -282,15 +302,27 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       // Set template
       const tplMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/template$/);
       if (tplMatch && tplMatch[1] && m === 'PUT') {
+        const projectId = tplMatch[1];
+        if (GENERATING.has(projectId)) {
+          return json(res, 409, { error: 'This project is already generating. Wait for the current run to finish.' });
+        }
         const body = await readBody(req);
-        const project = await ctx.orchestrator.setTemplate(tplMatch[1], body.template_id as string);
-        // Auto-seed preview with the template's own example.html so the user sees
-        // something immediately (before any chat-driven rewrite).
-        const tmpl = ctx.templates.get(body.template_id as string);
-        const exampleHtmlPath = join(tmpl.__dir!, tmpl.source_entry);
-        if (existsSync(exampleHtmlPath)) {
-          const html = await readFile(exampleHtmlPath, 'utf8');
-          await ctx.orchestrator.writePreviewHtmlRaw(project.id, html);
+        const templateId = typeof body.template_id === 'string' ? body.template_id : '';
+        const tmpl = ctx.templates.list().find((candidate) => candidate.id === templateId);
+        if (!tmpl) return json(res, 404, { error: `Template "${templateId}" not found.` });
+        const before = await ctx.orchestrator.load(projectId);
+        const hasStoryboard = (before.frames?.length ?? 0) > 0;
+        const project = await ctx.orchestrator.setTemplate(projectId, templateId);
+        // Empty projects get an immediate template preview. Existing storyboard
+        // frames must survive the switch so the optional restyle action can
+        // actually re-render them; writePreviewHtmlRaw() intentionally resets
+        // frames and was the reason template switching appeared ineffective.
+        if (!hasStoryboard && tmpl.__dir && tmpl.source_entry) {
+          const exampleHtmlPath = resolve(tmpl.__dir, tmpl.source_entry);
+          if (isPathInside(tmpl.__dir, exampleHtmlPath) && existsSync(exampleHtmlPath)) {
+            const html = await readFile(exampleHtmlPath, 'utf8');
+            await ctx.orchestrator.writePreviewHtmlRaw(project.id, html);
+          }
         }
         return json(res, 200, { project: await ctx.orchestrator.load(project.id) });
       }
@@ -847,11 +879,15 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       const narrateMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/narrate$/);
       if (narrateMatch && narrateMatch[1] && m === 'POST') {
         const projectId = narrateMatch[1];
+        if (GENERATING.has(projectId)) {
+          return json(res, 409, { error: 'This project is already generating. Wait for the current run to finish.' });
+        }
         const body = (await readBody(req)) as {
           script?: string;
           topic?: string;        // when script is omitted, agent expands this into a script first
           mode?: 'script' | 'topic';
           agentId?: string;
+          agentModel?: string;
           voiceId?: string;
           volumeDb?: number;
           templateId?: string;
@@ -861,6 +897,18 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (!agentId) return json(res, 400, { error: 'No agent selected.' });
         const agentDef = findAgent(agentId);
         if (!agentDef) return json(res, 400, { error: `agent "${agentId}" not registered` });
+        const aspect = normalizeTemplateAspect(body.aspect ?? '16:9');
+        const requestedNarrateTemplate = body.templateId
+          ? ctx.templates.list().find((t) => t.id === body.templateId) ?? null
+          : null;
+        if (body.templateId && !requestedNarrateTemplate) {
+          return json(res, 400, { error: `Template "${body.templateId}" not found.` });
+        }
+        if (requestedNarrateTemplate && !templateSupportsAspect(requestedNarrateTemplate, aspect)) {
+          return json(res, 400, {
+            error: `Template "${requestedNarrateTemplate.name_zh ?? requestedNarrateTemplate.name}" does not support ${aspect}. Choose a compatible template or use automatic selection.`,
+          });
+        }
 
         res.writeHead(200, {
           'content-type': 'text/event-stream; charset=utf-8',
@@ -873,6 +921,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         };
         const progress = (stage: string, messageKey: string) => sse({ type: 'narrate_progress', stage, message_key: messageKey });
 
+        GENERATING.add(projectId);
         try {
           const projectDir = await ctx.projects.ensureDir(projectId);
 
@@ -889,11 +938,24 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               `Write it in the same language as the topic.`,
               `Make it natural to read aloud, with clear sentence boundaries.`,
             ].join('\n');
-            script = (await callAgentSimple(agentDef, expandPrompt, projectDir)).trim();
+            script = (await callAgentSimple(agentDef, expandPrompt, projectDir, body.agentModel)).trim();
             if (!script) throw new Error('Agent returned an empty script.');
             sse({ type: 'narrate_script', script });
           }
           if (!script) throw new Error('Nothing to narrate — provide a script.');
+          const selectedNarrateTemplate = requestedNarrateTemplate
+            ?? autoSelectTemplate(ctx.templates.list(), {
+                text: `${body.topic ?? ''}\n${script}`,
+                aspect,
+                mode: 'narrate',
+              });
+          if (selectedNarrateTemplate && !body.templateId) {
+            sse({
+              type: 'template_auto_selected',
+              template_id: selectedNarrateTemplate.id,
+              template_name: selectedNarrateTemplate.name_zh ?? selectedNarrateTemplate.name,
+            });
+          }
 
           // Split the script into per-frame segments (one sentence-group each).
           // Ask the agent for a JSON array so splits are semantic, not just on
@@ -910,229 +972,84 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             `Output ONLY a JSON array of ${targetFrames} strings, each one a contiguous chunk of the script (in order, concatenated they must equal the whole script). No prose, no numbering.`,
           ].join('\n');
           let segments: string[] = [];
-          const splitRaw = (await callAgentSimple(agentDef, splitPrompt, projectDir)).trim();
+          const splitRaw = (await callAgentSimple(agentDef, splitPrompt, projectDir, body.agentModel)).trim();
           const jsonMatch = /\[[\s\S]*\]/.exec(splitRaw);
           if (jsonMatch) {
             try { segments = JSON.parse(jsonMatch[0]).map((s: unknown) => String(s).trim()).filter(Boolean); }
             catch { /* fall back below */ }
           }
-          if (segments.length < 2) {
-            // Deterministic fallback: split on sentence punctuation, clamp to targetFrames.
-            const sentences = script.split(/(?<=[。！？!?\.])\s*/).map((s) => s.trim()).filter(Boolean);
-            if (sentences.length <= targetFrames) {
-              segments = sentences.length ? sentences : [script];
-            } else {
-              segments = [];
-              const per = Math.ceil(sentences.length / targetFrames);
-              for (let i = 0; i < sentences.length; i += per) {
-                segments.push(sentences.slice(i, i + per).join(' '));
-              }
-            }
+          const normalizedSource = script.replace(/\s+/g, '');
+          const normalizedSplit = segments.join('').replace(/\s+/g, '');
+          if (segments.length !== targetFrames || normalizedSplit !== normalizedSource) {
+            // The split must be positional metadata only. If the agent rewrites,
+            // omits, duplicates, or returns the wrong count, use an exact local
+            // split that preserves every source character in order.
+            segments = splitNarrationSegments(script, targetFrames);
           }
-          // Merged script = authoritative narration text (in case the agent trimmed).
-          const fullNarrationText = segments.join(' ').replace(/\s+/g, ' ').trim() || script.trim();
+          const fullNarrationText = script.trim();
 
-          // ---- Step 2: build the content-graph deterministically ----
-          // Each segment → one text-node frame. Duration is provisional; the
-          // real values come from the audio probe in step 5.
-          const aspect = body.aspect ?? '16:9';
-          type VisualFramePlan = {
-            screen_headline: string;
-            screen_points?: string[];
-            visual_note?: string;
-          };
-          const makeFallbackVisualPlan = (): VisualFramePlan[] => segments.map((seg) => {
-            const headline = seg.split(/(?<=[。！？?\.])\s*/)[0]?.trim() || seg.slice(0, 40);
-            return {
-              screen_headline: headline.slice(0, 40),
-              screen_points: [seg.replace(/\s+/g, ' ').slice(0, 48)].filter(Boolean),
-              visual_note: 'Summarize the narration into concise visual content.',
-            };
-          });
-          let visualPlan = makeFallbackVisualPlan();
-          try {
-            progress('plan', 'narrate.progress.plan');
-            const selectedTemplate = body.templateId
-              ? ctx.templates.list().find((t) => t.id === body.templateId)
-              : undefined;
-            const visualPlanPrompt = [
-              `Convert this narrated voiceover into a visual storyboard plan for ${segments.length} video frames.`,
-              `The voiceover is for audio only. Do NOT copy whole spoken sentences onto the screen.`,
-              `For each frame, infer the meaning, summarize it, and design screen content that fits a presentation/video template.`,
-              `Use concise headlines, short labels, keywords, metrics, comparisons, process steps, or diagram notes.`,
-              `Keep the same language as the script.`,
-              selectedTemplate
-                ? `Selected template: ${selectedTemplate.name}. Template description: ${selectedTemplate.description}. Shape the screen content for that template's likely layout.`
-                : `No fixed template; use a clean explainer structure.`,
-              ``,
-              `Full voiceover:`,
-              fullNarrationText,
-              ``,
-              `Segments, one per frame:`,
-              ...segments.map((seg, i) => `${i + 1}. ${seg}`),
-              ``,
-              `Output ONLY valid JSON: an array of exactly ${segments.length} objects.`,
-              `Each object must have: screen_headline (max 18 Chinese chars or 8 English words), screen_points (2-4 short phrases), visual_note (brief layout/visual metaphor).`,
-              `No markdown. No prose.`,
-            ].join('\n');
-            const visualPlanRaw = (await callAgentSimple(agentDef, visualPlanPrompt, projectDir)).trim();
-            const jsonMatch = /\[[\s\S]*\]/.exec(visualPlanRaw);
-            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : JSON.parse(visualPlanRaw);
-            if (Array.isArray(parsed) && parsed.length === segments.length) {
-              visualPlan = parsed.map((item, i) => {
-                const fallback = visualPlan[i]!;
-                const points = Array.isArray(item?.screen_points)
-                  ? item.screen_points.map((p: unknown) => String(p).trim()).filter(Boolean).slice(0, 4)
-                  : fallback.screen_points;
-                return {
-                  screen_headline: String(item?.screen_headline ?? fallback.screen_headline).trim().slice(0, 60) || fallback.screen_headline,
-                  screen_points: points,
-                  visual_note: String(item?.visual_note ?? fallback.visual_note ?? '').trim().slice(0, 180),
-                };
-              });
-            }
-          } catch (e) {
-            process.stderr.write(`[studio:narrate] visual plan fallback: ${e instanceof Error ? e.message : String(e)}\n`);
-          }
-          const graph: import('@html-video/content-graph').ContentGraph = {
-            schemaVersion: 1,
-            intent: 'explainer',
-            synopsis: fullNarrationText.slice(0, 80),
-            nodes: segments.map((seg, i) => {
-              const id = `frame_${i + 1}`;
-              const plan = visualPlan[i] ?? makeFallbackVisualPlan()[i]!;
-              const screenText = [
-                plan.screen_headline,
-                ...(plan.screen_points ?? []),
-              ].map((part) => part.trim()).filter(Boolean).join(' / ');
-              return {
-                id,
-                kind: 'text' as const,
-                label: plan.screen_headline.slice(0, 60),
-                durationSec: 3,
-                text: screenText || seg.slice(0, 80),
-                frameIntent: plan.visual_note,
-              };
-            }),
-            edges: [],
-          };
-          await ctx.orchestrator.writeContentGraph(projectId, graph, { preserveFrames: false });
-          // Set resolution so export records at the right aspect.
+          // ---- Steps 2-3: understand the script, plan the storyboard, and
+          // design every frame with the selected template's visual language.
+          // The old path immediately ran localTemplateFrameHtml() for selected
+          // templates, which reduced generation to text substitution. The
+          // shared split generator gives the agent both semantic planning and
+          // per-frame composition/motion responsibility; local rendering is
+          // retained only as the timeout/error fallback.
           {
-            let res = '1920×1080';
-            if (aspect === '9:16') res = '1080×1920';
-            else if (aspect === '1:1') res = '1080×1080';
-            else if (aspect === '4:5') res = '1080×1350';
-            const [w, h] = res.split('×').map(Number);
+            const [w, h] = resolutionForAspect(aspect);
+
             const proj = await ctx.projects.load(projectId);
-            proj.preferences = { ...proj.preferences, ...(w && h ? { resolution: { width: w, height: h } } : {}) };
-            if (body.templateId) proj.templateId = body.templateId;
+            proj.preferences = { ...proj.preferences, resolution: { width: w, height: h } };
+            proj.templateId = selectedNarrateTemplate?.id ?? null;
             await ctx.projects.save(proj);
           }
-          sse({ type: 'narrate_graph', frame_count: graph.nodes.length });
-
-          // ---- Step 3: per-frame HTML (reuse the storyboard frame prompt) ----
           progress('frames', 'narrate.progress.frames');
-          const selectedTemplateForFrames = body.templateId ? ctx.templates.get(body.templateId) : null;
-          let templateStyleReference = '';
-          if (selectedTemplateForFrames?.__dir && selectedTemplateForFrames.source_entry) {
-            const sourcePath = join(selectedTemplateForFrames.__dir, selectedTemplateForFrames.source_entry);
-            const compositionPath = join(selectedTemplateForFrames.__dir, 'compositions');
-            try {
-              const chunks: string[] = [];
-              if (existsSync(sourcePath)) chunks.push(await readFile(sourcePath, 'utf8'));
-              if (existsSync(compositionPath) && statSync(compositionPath).isDirectory()) {
-                const { readdir } = await import('node:fs/promises');
-                const compositionFiles = (await readdir(compositionPath))
-                  .filter((name) => name.toLowerCase().endsWith('.html'))
-                  .sort()
-                  .slice(0, 3);
-                for (const name of compositionFiles) {
-                  chunks.push(await readFile(join(compositionPath, name), 'utf8'));
-                }
-              }
-              templateStyleReference = chunks.join('\n\n').slice(0, 5200);
-            } catch (e) {
-              process.stderr.write(`[studio:narrate] template style reference unavailable: ${e instanceof Error ? e.message : String(e)}\n`);
-            }
-          }
-          const pickedStyle = selectedTemplateForFrames
-            ? `(use template "${selectedTemplateForFrames.name}" — ${selectedTemplateForFrames.description})`
-            : '';
-          let styleAnchorHtml = '';
-          for (let i = 0; i < graph.nodes.length; i++) {
-            const node = graph.nodes[i]!;
-            const seg = segments[i]!;
-            const plan = visualPlan[i] ?? makeFallbackVisualPlan()[i]!;
-            const headline = node.label ?? plan.screen_headline ?? seg.slice(0, 40);
-            const nodeText = node.kind === 'text' ? node.text : '';
-            const screenPoints = (plan.screen_points ?? []).join(' | ') || nodeText;
-            const visualDirection = plan.visual_note || node.frameIntent || 'Summarize the idea visually.';
-            const fp = [
-              `Output ONE complete HTML video frame in a fenced \`\`\`html block. No prose outside the block.`,
-              `This is frame ${i + 1} of ${graph.nodes.length} of a narrated video.`,
-              `Screen headline (derived, not transcript): "${headline}"`,
-              `Screen points: "${screenPoints}"`,
-              `Visual direction: ${visualDirection}`,
-              `Voiceover context (for meaning only, do NOT paste verbatim): "${seg.slice(0, 220)}"`,
-              `Do NOT display the full voiceover sentence. Transform the narration into concise template-native visual content.`,
-              `Aspect: ${aspect}. Inline CSS only, opens with a subtle entrance animation, tag text with data-hv-text.`,
-              pickedStyle ? `Style: ${pickedStyle}` : `Style: tasteful default, high contrast, readable.`,
-              templateStyleReference
-                ? `Template visual reference (REQUIRED): reuse this template's palette, typography, layout vocabulary, connector/card shapes, and motion approach. Do not switch to another look:\n\`\`\`html\n${templateStyleReference}\n\`\`\``
-                : ``,
-              styleAnchorHtml
-                ? `Previous frame visual anchor (REQUIRED): match its palette, background, typography, spacing, and component treatment so this video feels like one template family:\n\`\`\`html\n${styleAnchorHtml.slice(0, 3000)}\n\`\`\``
-                : ``,
-              `Across all frames, keep one consistent visual system. Do not alternate dark/light themes unless the selected template itself does that.`,
-              `Begin your reply with \`\`\`html.`,
-            ].filter(Boolean).join('\n');
-            const frameText = await callAgentSimple(agentDef, fp, projectDir);
-            let extracted = extractHtmlFromAgentText(frameText);
-            if (!extracted) {
-              const retryPrompt = [
-                `Output ONE complete HTML page in a fenced \`\`\`html block. No prose.`,
-                `Frame ${i + 1}/${graph.nodes.length}. Derived headline: "${headline}".`,
-                `Use these on-screen points, not the raw transcript: "${screenPoints}"`,
-                `Visual direction: ${visualDirection}`,
-                `Voiceover context for meaning only: "${seg.slice(0, 220)}"`,
-                `Do NOT paste the spoken line onto the screen.`,
-                `Aspect: ${aspect}. Inline CSS only. Full-bleed, readable, animated entrance. Tag visible text with data-hv-text.`,
-                pickedStyle ? `Style: ${pickedStyle}` : `Style: tasteful default, high contrast, readable.`,
-                templateStyleReference
-                  ? `Template visual reference is mandatory; keep its visual system:\n\`\`\`html\n${templateStyleReference}\n\`\`\``
-                  : ``,
-                styleAnchorHtml
-                  ? `Match this previous frame's visual system:\n\`\`\`html\n${styleAnchorHtml.slice(0, 3000)}\n\`\`\``
-                  : ``,
-                `Keep the palette, background, typography, and component treatment consistent with the other frames.`,
-                `Begin with \`\`\`html.`,
-              ].filter(Boolean).join('\n');
-              const retryText = await callAgentSimple(agentDef, retryPrompt, projectDir);
-              extracted = extractHtmlFromAgentText(retryText);
-              if (!extracted) {
-                await writeNarrateFrameDebug(projectDir, node.id, fp, frameText, retryPrompt, retryText);
-                process.stderr.write(
-                  `[studio:narrate] proj=${projectId} frame=${node.id} empty html; using local fallback. first=${frameText.length}B retry=${retryText.length}B\n`,
-                );
+          await runSplitMultiFrameGenerate({
+            ctx,
+            projectId,
+            projectDir,
+            agentDef,
+            agentModel: body.agentModel,
+            tmpl: selectedNarrateTemplate,
+            priorHtml: '',
+            inputs: {
+              collected: {
+                aspect,
+                frame_count: String(segments.length),
+                per_frame: '3',
+              },
+              pickedType: '口播脚本视频',
+              pickedStyle: selectedNarrateTemplate ? '从设计模板选择' : '内容驱动的专业视频设计',
+              contentTurns: [
+                `完整口播脚本：${fullNarrationText}`,
+                ...segments.map((segment, index) => `第 ${index + 1} 帧口播原文（语义和事实必须保持）：${segment}`),
+                `先理解每段的核心语义、事实、对象和关系，再设计画面信息层级与动画。禁止只把口播原文塞进模板或做成普通字幕卡。`,
+              ],
+            },
+            attachments: [],
+            fallbackFrameTexts: segments,
+            openingTopic: fullNarrationText.slice(0, 160),
+            restyleOnly: false,
+            failOnAgentError: true,
+            onProgress: (message) => sse({ type: 'narrate_design_progress', message }),
+            onSse: (event) => {
+              const detail = event as Record<string, unknown>;
+              if (detail.type === 'plan_ready') {
+                sse({ type: 'narrate_graph', frame_count: detail.frame_count, intent: detail.intent });
+              } else if (detail.type === 'frame_done') {
                 sse({
-                  type: 'narrate_progress',
-                  stage: 'frames',
-                  message: `Frame ${i + 1} agent returned empty HTML; using local fallback.`,
-                });
-                extracted = localTranscriptFrameHtml({
-                  index: i,
-                  total: graph.nodes.length,
-                  text: String((nodeText || screenPoints) || seg.slice(0, 80)),
-                  synopsis: visualDirection,
-                  type: 'Narrated video',
-                  style: pickedStyle || 'clean editorial explainer',
+                  type: 'narrate_frame_done',
+                  node_id: detail.node_id,
+                  order: detail.order,
+                  total: detail.total,
                 });
               }
-            }
-            await ctx.orchestrator.writeFrameHtml(projectId, node.id, extracted);
-            if (!styleAnchorHtml) styleAnchorHtml = extracted;
-            sse({ type: 'narrate_frame_done', node_id: node.id, order: i, total: graph.nodes.length });
+            },
+          });
+          const graph = await ctx.orchestrator.readContentGraph(projectId);
+          if (!graph || graph.nodes.length === 0) {
+            throw new Error('Storyboard generation produced no frames.');
+
           }
 
           // ---- Step 4: synthesize the narration TTS ----
@@ -1212,6 +1129,8 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           const msg = err instanceof Error ? err.message : String(err);
           process.stderr.write(`[studio:narrate] proj=${projectId} failed: ${msg}\n`);
           sse({ type: 'narrate_failed', message: msg });
+        } finally {
+          GENERATING.delete(projectId);
         }
         res.end();
         return;
@@ -1575,26 +1494,26 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (!def) return json(res, 404, { error: `agent "${agentId}" not registered` });
         const prompt = 'Reply with one word: hello.';
         const t0 = Date.now();
-        let out = '';
-        let err = '';
-        const handle = spawnAgent({
-          def,
-          prompt,
-          context: { cwd: process.cwd() },
-          onEvent: (ev) => {
-            if (ev.type === 'text') out += ev.chunk;
-            else if (ev.type === 'error') err = ev.message;
-          },
-        });
-        const exit = await handle.done;
-        return json(res, 200, {
-          ok: exit.exitCode === 0 && out.trim().length > 0,
-          exit_code: exit.exitCode,
-          ms: Date.now() - t0,
-          bytes: out.length,
-          stdout_head: out.slice(0, 200),
-          error: err || (out.trim().length === 0 ? 'empty reply' : undefined),
-        });
+        try {
+          const out = await callAgentSimple(def, prompt, process.cwd(), undefined, 45_000);
+          return json(res, 200, {
+            ok: true,
+            exit_code: 0,
+            ms: Date.now() - t0,
+            bytes: out.length,
+            stdout_head: out.slice(0, 200),
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return json(res, 200, {
+            ok: false,
+            exit_code: 1,
+            ms: Date.now() - t0,
+            bytes: 0,
+            stdout_head: '',
+            error: summarizeAgentFailure(message),
+          });
+        }
       }
 
       // Messages: GET history (lazy-loads from messages.json on first hit)
@@ -1610,12 +1529,16 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       // prompt as attachments.
       if (msgsMatch && msgsMatch[1] && m === 'POST') {
         const id = msgsMatch[1];
+        if (GENERATING.has(id)) {
+          return json(res, 409, { error: 'This project is already generating. Wait for the current run to finish.' });
+        }
         const ct = req.headers['content-type'] ?? '';
         let userText = '';
         let focusFrameId = '';
         const attachments: Attachment[] = [];
 
         const project0 = await ctx.orchestrator.load(id);
+        const sourceEvents: Array<Record<string, unknown>> = [];
         if (ct.startsWith('multipart/form-data')) {
           const parts = await receiveMultipart(req, ct);
           for (const p of parts) {
@@ -1684,17 +1607,52 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               process.stderr.write(
                 `[studio:fetch-source] ${src.kind} ${sourceUrl} → ${src.markdown.length} chars${src.truncated ? ' (truncated)' : ''}\n`,
               );
+              sourceEvents.push({
+                type: 'source_status',
+                status: 'ok',
+                url: sourceUrl,
+                title: src.title || sourceUrl,
+                kind: src.kind,
+                truncated: src.truncated,
+              });
             }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             process.stderr.write(`[studio:fetch-source] skip ${sourceUrl}: ${msg}\n`);
+            sourceEvents.push({
+              type: 'source_status',
+              status: 'failed',
+              url: sourceUrl,
+              message: msg,
+            });
           }
         }
 
         // Re-fetch project after potential addFileAsset side-effects
-        const project = await ctx.orchestrator.load(id);
-        const tmpl = project.templateId ? ctx.templates.get(project.templateId) : null;
-        // No template required — agent can synthesize from scratch when none picked.
+        let project = await ctx.orchestrator.load(id);
+        let tmpl = project.templateId ? ctx.templates.get(project.templateId) : null;
+        if (!tmpl) {
+          const autoTemplate = autoSelectTemplate(ctx.templates.list(), {
+            text: [
+              userText,
+              ...attachments.map((a) => `${a.filename} ${a.inlineText ?? ''}`),
+              ...project.assets.map((a) => `${a.metadata.filename ?? ''} ${a.metadata.userCaption ?? ''}`),
+            ].join('\n'),
+            aspect: String(project.preferences.resolution?.width && project.preferences.resolution?.height
+              ? `${project.preferences.resolution.width}:${project.preferences.resolution.height}`
+              : '16:9'),
+            mode: 'chat',
+          });
+          if (autoTemplate) {
+            project = await ctx.orchestrator.setTemplate(id, autoTemplate.id);
+            tmpl = autoTemplate;
+            sourceEvents.push({
+              type: 'template_auto_selected',
+              template_id: autoTemplate.id,
+              template_name: autoTemplate.name_zh ?? autoTemplate.name,
+            });
+          }
+        }
 
         // Resolve the agent. Pinned project agent wins. Otherwise pick the first
         // available agent that needs no extra setup (skip AMR — it's available
@@ -1705,9 +1663,13 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         let detectedAgents: Awaited<ReturnType<typeof detectAll>> | null = null;
         if (!agentId) {
           detectedAgents = await detectAll();
-          // Prefer a real, ready-to-run CLI agent (claude/codex/...). Only fall
-          // back to anthropic-api if it's actually configured (has a key).
-          // Persist the choice so later turns don't depend on a fresh probe.
+          // Prefer a real, ready-to-run CLI agent (claude/codex/…). Only fall
+          // back to anthropic-api if it's actually configured (has a key) —
+          // otherwise picking it would fail mid-flow with "No ANTHROPIC_API_KEY"
+          // on a later turn (e.g. after the detect cache expires and a transient
+          // probe miss drops the CLI agent). Persist the choice so every
+          // subsequent turn in this project uses the same agent, not whatever
+          // a fresh probe happens to return.
           const ready = detectedAgents.filter((a) => a.available && a.id !== 'amr');
           const apiReady = ready.find((a) => a.id === 'anthropic-api');
           agentId =
@@ -1722,12 +1684,24 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             }
           }
         }
+        detectedAgents ??= await detectAll();
+        let agentAvailable = !!detectedAgents.find((a) => a.id === agentId)?.available;
+        if (!agentAvailable) {
+          const fallbackAgent = detectedAgents.find((a) => a.available && a.id !== 'amr');
+          if (!fallbackAgent) {
+            return json(res, 400, { error: `agent "${agentId}" is unavailable and no fallback agent is ready` });
+          }
+          process.stderr.write(`[studio:msg] proj=${id} agent=${agentId} unavailable; falling back to ${fallbackAgent.id}\n`);
+          agentId = fallbackAgent.id;
+          agentAvailable = true;
+          try {
+            await ctx.orchestrator.setAgent(id, agentId, null);
+          } catch { /* best-effort; this request can still proceed */ }
+        }
         const agentDef = findAgent(agentId);
         if (!agentDef) {
           return json(res, 400, { error: `agent "${agentId}" not registered` });
         }
-        detectedAgents ??= await detectAll();
-        const agentAvailable = !!detectedAgents.find((a) => a.id === agentId)?.available;
         // Model the user picked for this agent (AMR); undefined → agent default.
         const agentModel = project.agentModel ?? undefined;
 
@@ -1762,10 +1736,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           || (existsSync(priorHtmlPath) ? await readFile(priorHtmlPath, 'utf8') : '');
         let exampleHtml = '';
         if (tmpl) {
-          const exampleHtmlPath = join(tmpl.__dir!, tmpl.source_entry);
-          if (existsSync(exampleHtmlPath)) {
-            exampleHtml = await readFile(exampleHtmlPath, 'utf8');
-          }
+          exampleHtml = await loadTemplateGenerationSource(tmpl);
         }
 
         // Carry source material across turns: a link/file is usually attached
@@ -1859,6 +1830,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           !!project.templateId,
           attachments.some((a) => !!a.inlineText),
           focusFrameId,
+          (project.frames ?? []).length > 0,
         );
         const t0 = Date.now();
         // Save the prompt next to the project so we can inspect what we sent.
@@ -1897,6 +1869,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           try { if (!res.writableEnded) res.write(`data: ${JSON.stringify(obj)}\n\n`); }
           catch { /* client disconnected — keep generating, result is persisted below */ }
         };
+        for (const ev of sourceEvents) sseWrite(ev);
 
         let assistantText = '';
         let textChunks = 0;
@@ -1913,8 +1886,9 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
 
         // Post-generation iteration: the card-driven sub-flow resolved to a
         // concrete change. Re-use the existing storyboard rather than guessing.
-        //   restyle         → keep graph text, re-render every frame in the newly
-        //                      picked style.
+        //   restyle         → keep the existing video's meaning/source, but
+        //                      re-plan frame content so the new template's
+        //                      native structures (hero/list/metrics/etc.) fit.
         //   iterate-content → re-plan the whole storyboard around new content.
         //   iterate-format  → re-time and re-render with the new per-frame length.
         const isMultiFrameProject =
@@ -1923,13 +1897,21 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         let rewriteInputs: PhaseInputs | undefined;
         let restyleOnly = false;
         if (phaseInfo.phase === 'restyle' && isMultiFrameProject) {
-          // Keep text, change visual style. pickedStyle is the user's new pick.
-          restyleOnly = true;
+          const n = (project.frames ?? []).length || Number(phaseInfo.inputs.collected?.frame_count ?? '4') || 4;
+          const storyboardSource = await existingStoryboardSource(ctx, id, project);
           rewriteInputs = {
             ...phaseInfo.inputs,
+            collected: {
+              ...(phaseInfo.inputs.collected ?? {}),
+              frame_count: String(n),
+            },
             pickedType: lastCardPickByPhase(history, 'type') ?? phaseInfo.inputs.pickedType,
             pickedStyle: phaseInfo.inputs.pickedStyle || userText.trim(),
-            contentTurns: collectContentTurns(history),
+            contentTurns: [
+              ...collectContentTurns(history),
+              storyboardSource,
+              `按当前选择的新模板重新组织这些内容。不是机械替换皮肤；要根据模板的结构槽位重排每一帧的标题、列表、指标和说明。`,
+            ].filter((s) => s.trim() && !isControlPhrase(s)),
           };
         } else if (phaseInfo.phase === 'iterate-content' && isMultiFrameProject) {
           // Re-plan around the user's new content instruction.
@@ -1956,7 +1938,9 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             const n = (project.frames ?? []).length || Number(phaseInfo.inputs.collected?.frame_count ?? '3');
             const notice = restyleOnly
               ? `🎨 沿用文案，按新风格重做全部 ${n} 帧…\n`
-              : `🔄 基于新内容重做全部 ${n} 帧（已手动修改过的帧会被覆盖）…\n`;
+              : phaseInfo.phase === 'restyle'
+                ? `🎨 按新模板结构重新编排全部 ${n} 帧…\n`
+                : `🔄 基于新内容重做全部 ${n} 帧（已手动修改过的帧会被覆盖）…\n`;
             assistantText += notice;
             sseWrite({ type: 'text', chunk: notice });
           }
@@ -1981,7 +1965,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               onSse: sseWrite,
             });
             summaryLine = rewriteInputs
-              ? `✓ ${result.frameCount}-frame storyboard ${restyleOnly ? 'restyled' : 'regenerated'} (intent: ${result.intent})`
+              ? `✓ ${result.frameCount}-frame storyboard ${phaseInfo.phase === 'restyle' ? 'adapted to template' : restyleOnly ? 'restyled' : 'regenerated'} (intent: ${result.intent})`
               : `✓ ${result.frameCount}-frame storyboard generated (intent: ${result.intent})`;
             sseWrite({ type: 'preview_ready', preview_url: `/preview/${id}`, frames: result.frameCount });
             sseWrite({ type: 'message_end', reason: 'ok' });
@@ -2014,7 +1998,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               }
             },
           });
-          const exitInfo = await handle.done;
+          const exitInfo = await awaitAgentDone(handle);
           const elapsedMs = Date.now() - t0;
           process.stderr.write(
             `[studio:msg] proj=${id} phase=${phaseInfo.phase} done in ${elapsedMs}ms exit=${exitInfo.exitCode} text=${assistantText.length}B chunks=${textChunks}\n`,
@@ -2056,7 +2040,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
                 }
               },
             });
-            await retryHandle.done;
+            await awaitAgentDone(retryHandle);
             assistantText += retryText;
             process.stderr.write(
               `[studio:msg] proj=${id} retry done text=${retryText.length}B\n`,
@@ -2107,10 +2091,11 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         // Auto-advance: the content prompt instructs the agent to append
         // <!-- hv-phase:content-question --> when it still needs more info.
         // Absence of that marker means it has enough — immediately run the
-        // template-pick phase in the same SSE stream so the user sees the card
+        // style phase in the same SSE stream so the user sees the style card
         // without having to send an extra "ok" message.
         if (phaseInfo.phase === 'content' && !/<!--\s*hv-phase:content-question\s*-->/i.test(assistantText)) {
-          const stylePrompt = buildNeedTemplatePrompt();
+          const autoPickedType = lastCardPickByPhase(history, 'type') ?? phaseInfo.inputs.pickedType ?? '';
+          const stylePrompt = buildStylePhasePrompt(autoPickedType);
           const styleHandle = spawnAgent({
             def: agentDef,
             prompt: stylePrompt,
@@ -2125,7 +2110,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               }
             },
           });
-          await styleHandle.done;
+          await awaitAgentDone(styleHandle);
         }
 
         // Persist assistant message — strip the html / graph blocks when present (UI sees summary line)
@@ -2293,7 +2278,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         const filePath = sub === '/preview.html' || sub === '/'
           ? project.lastPreviewHtmlPath!
           : join(baseDir, sub);
-        if (existsSync(filePath) && statSync(filePath).isFile()) {
+        if (isPathInside(baseDir, filePath) && existsSync(filePath) && statSync(filePath).isFile()) {
           return serveFile(filePath, res);
         }
         // Fallback: also try project assets/
@@ -2313,11 +2298,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               const tmplFile = join(tmpl.__dir, sub.replace(/^\//, ''));
               const tmplResolved = resolve(tmplFile);
               const tmplRoot = resolve(tmpl.__dir);
-              if (
-                tmplResolved.startsWith(tmplRoot + '/') &&
-                existsSync(tmplResolved) &&
-                statSync(tmplResolved).isFile()
-              ) {
+              if (isPathInside(tmplRoot, tmplResolved) && existsSync(tmplResolved) && statSync(tmplResolved).isFile()) {
                 return serveFile(tmplResolved, res);
               }
             }
@@ -2339,7 +2320,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         }
         const safe = resolve(p);
         const projectsDir = resolve(join(ctx.projectRoot, '.html-video', 'projects'));
-        if (!safe.startsWith(projectsDir + '/') && !safe.startsWith(projectsDir + '\\')) {
+        if (!isPathInside(projectsDir, safe)) {
           res.writeHead(403);
           return res.end('forbidden');
         }
@@ -2353,7 +2334,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         const samplesDir = voiceCloneSamplesDir(ctx.projectRoot);
         const safe = resolve(samplesDir, basename(voiceSampleMatch[1]));
         const resolvedSamplesDir = resolve(samplesDir);
-        if (!safe.startsWith(resolvedSamplesDir + '/') && !safe.startsWith(resolvedSamplesDir + '\\')) {
+        if (!isPathInside(resolvedSamplesDir, safe)) {
           res.writeHead(403);
           return res.end('forbidden');
         }
@@ -2373,7 +2354,11 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           return res.end('template not found');
         }
         const rel = tplAssetMatch[2];
-        const filePath = join(t.__dir!, rel);
+        const filePath = resolve(t.__dir!, rel);
+        if (!isPathInside(t.__dir!, filePath)) {
+          res.writeHead(403);
+          return res.end('forbidden');
+        }
         if (!existsSync(filePath)) {
           res.writeHead(404);
           return res.end();
@@ -2387,6 +2372,20 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         // touched — this rewrite happens only on the way out the wire.
         if (extname(filePath).toLowerCase() === '.html') {
           let html = await readFile(filePath, 'utf8');
+          const staticPreview = url.searchParams.get('static') === '1';
+          if (staticPreview) {
+            const frameIndex = Math.max(0, Number(url.searchParams.get('frame') ?? '0') || 0);
+            const progress = Math.max(0.08, Math.min(0.95, Number(url.searchParams.get('progress') ?? '0.68') || 0.68));
+            html = /data-composition-src/.test(html)
+              ? injectCompositionPlayer(html, t.id, { staticFrameIndex: frameIndex, staticProgress: progress })
+              : injectStaticTemplatePreview(html, { frameIndex, progress });
+            res.writeHead(200, {
+              'content-type': MIME['.html']!,
+              'cache-control': 'no-store, no-cache, must-revalidate',
+              pragma: 'no-cache',
+            });
+            return res.end(html);
+          }
           if (/data-composition-src/.test(html)) {
             html = injectCompositionPlayer(html, t.id);
             res.writeHead(200, {
@@ -2403,7 +2402,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       // ============== Static UI ==============
       const path = url.pathname === '/' ? '/index.html' : url.pathname;
       const filePath = join(uiRoot, path);
-      if (filePath.startsWith(uiRoot) && existsSync(filePath) && statSync(filePath).isFile()) {
+      if (isPathInside(uiRoot, filePath) && existsSync(filePath) && statSync(filePath).isFile()) {
         return serveFile(filePath, res);
       }
 
@@ -2449,25 +2448,208 @@ function aspectFromProject(project: import('@html-video/core').Project): string 
 }
 
 /**
- * Decide how the gallery should preview a template. Both self-contained
- * entries and multi-composition entries now render live in an iframe: the
- * latter get an injected composition player (see injectCompositionPlayer) that
- * assembles the sub-comps and plays their timelines, so 'iframe' is the right
- * mode for everything that has a readable entry.
+ * Every template uses the same static-frame preview contract. Hyperframes HTML
+ * entries are frozen at explicit timeline positions; native engine entries
+ * (for example Remotion TypeScript compositions) use the shipped poster because
+ * loading source TS in an iframe produces a blank card and can stall the modal.
  *
  * `posterUrl` is still surfaced (when the poster file exists) so the frontend
  * can fall back to a static poster if the live iframe ever fails to render.
  */
 function templatePreviewMode(
   t: import('@html-video/core').TemplateMetadata,
-): { mode: 'iframe' | 'poster'; posterUrl: string | null } {
+): { mode: 'static-frames'; posterUrl: string | null } {
   const posterRel = t.preview?.poster;
   const posterPath = posterRel && t.__dir ? join(t.__dir, posterRel) : null;
   const posterUrl =
     posterPath && existsSync(posterPath)
       ? `/template-asset/${t.id}/${posterRel}`
       : null;
-  return { mode: 'iframe', posterUrl };
+  return { mode: 'static-frames', posterUrl };
+}
+
+type StaticTemplatePreviewFrame = {
+  label: string;
+  url: string;
+  kind: 'iframe' | 'poster';
+  progress?: number;
+};
+
+async function templateStaticPreview(
+  t: TemplateMetadata,
+  posterUrl: string | null,
+): Promise<{ frames: StaticTemplatePreviewFrame[]; elements: string[]; motion: string[] }> {
+  const posterFrame = (): StaticTemplatePreviewFrame[] => posterUrl
+    ? [{ label: 'overview', url: posterUrl, kind: 'poster' }]
+    : [];
+  if (!t.__dir || !t.source_entry || t.native || !t.source_entry.endsWith('.html')) {
+    return { frames: posterFrame(), elements: templatePreviewElements(t, ''), motion: ['data-growth'] };
+  }
+
+  const entryPath = join(t.__dir, t.source_entry);
+  if (!existsSync(entryPath)) {
+    return { frames: posterFrame(), elements: templatePreviewElements(t, ''), motion: [] };
+  }
+  const source = await readFile(entryPath, 'utf8');
+  const encodedId = encodeURIComponent(t.id);
+  const encodedEntry = t.source_entry.split('/').map(encodeURIComponent).join('/');
+  const base = `/template-asset/${encodedId}/${encodedEntry}`;
+  const compositionPaths = Array.from(source.matchAll(/data-composition-src=["']([^"']+)["']/gi))
+    .map((match) => match[1] ?? '')
+    .filter(Boolean);
+  const uniqueCompositions = [...new Set(compositionPaths)].slice(0, 6);
+  let frames: StaticTemplatePreviewFrame[];
+
+  if (uniqueCompositions.length > 0) {
+    frames = uniqueCompositions.map((path, index) => ({
+      label: basename(path, extname(path)).replace(/[-_]+/g, ' '),
+      url: `${base}?static=1&frame=${index}&progress=.68`,
+      kind: 'iframe',
+      progress: 0.68,
+    }));
+  } else {
+    const frameCount = Math.min(6, extractTemplateFrameBlocks(source).length);
+    if (frameCount > 1) {
+      const labels = Array.from(source.matchAll(/class=["'][^"']*flabel[^"']*["'][^>]*>[\s\S]*?<b>([^<]+)<\/b>/gi))
+        .map((match) => (match[1] ?? '').trim());
+      frames = Array.from({ length: frameCount }, (_, index) => ({
+        label: labels[index] || `frame ${String(index + 1).padStart(2, '0')}`,
+        url: `${base}?static=1&frame=${index}&progress=.72`,
+        kind: 'iframe' as const,
+        progress: 0.72,
+      }));
+    } else {
+      // A single animated composition is shown as three frozen key moments.
+      // They are ordinary HTML frames, never a playing video/animation.
+      frames = [0.22, 0.58, 0.9].map((progress, index) => ({
+        label: ['opening', 'main', 'final'][index]!,
+        url: `${base}?static=1&frame=0&progress=${progress}`,
+        kind: 'iframe' as const,
+        progress,
+      }));
+    }
+  }
+  return {
+    frames: frames.length > 0 ? frames : posterFrame(),
+    elements: templatePreviewElements(t, source),
+    motion: templatePreviewMotion(source),
+  };
+}
+
+function templatePreviewElements(t: TemplateMetadata, source: string): string[] {
+  const hay = [t.category, t.subcategory ?? '', t.tags.join(' '), t.best_for.join(' '), source].join('\n');
+  const rules: Array<[string, RegExp]> = [
+    ['title', /headline|hero|title|cover|<h1\b/i],
+    ['body', /standfirst|subtitle|description|lede|<p\b/i],
+    ['list', /ledger|agenda|steps?|cards?|items?/i],
+    ['quote', /quote|blockquote|manifesto/i],
+    ['metrics', /metric|kpi|stat|number-counter|dashboard/i],
+    ['chart', /chart|graph|bar|ranking|rollup/i],
+    ['timeline', /timeline|process|workflow|phase/i],
+    ['diagram', /flowchart|decision|branching|node-graph|system-diagram|service-map/i],
+    ['code', /code|terminal|vscode|workbench/i],
+    ['media', /<img\b|<video\b|product-demo|showcase/i],
+    ['brand', /logo|brand|outro|end-card/i],
+  ];
+  return rules.filter(([, pattern]) => pattern.test(hay)).map(([key]) => key).slice(0, 7);
+}
+
+function templatePreviewMotion(source: string): string[] {
+  const motion: string[] = [];
+  if (/opacity|fade|reveal/i.test(source)) motion.push('fade');
+  if (/translate[XY3d(]|slide|sweep/i.test(source)) motion.push('slide');
+  if (/\bscale[XY(]|zoom|pop/i.test(source)) motion.push('scale');
+  if (/stagger/i.test(source)) motion.push('stagger');
+  if (/strokeDash|lineDraw|connector/i.test(source)) motion.push('line-draw');
+  if (/counter|rolled|barHeight|grow|chart/i.test(source)) motion.push('data-growth');
+  if (/gsap\.timeline|__timelines/i.test(source)) motion.push('timeline');
+  return [...new Set(motion)].slice(0, 6);
+}
+
+function autoSelectTemplate(
+  templates: TemplateMetadata[],
+  args: { text: string; aspect?: string; mode?: 'narrate' | 'chat' | 'talking-head' },
+): TemplateMetadata | null {
+  const q = normalizeTemplateQuery(args.text);
+  const aspect = normalizeTemplateAspect(args.aspect ?? '16:9');
+  const candidates = templates.filter((t) => templateSupportsAspect(t, aspect));
+  // Do not force an aspect-incompatible template into the requested canvas.
+  // If no template supports the aspect (currently common for 4:5), returning
+  // null deliberately routes generation through the responsive full-bleed path.
+  if (candidates.length === 0) return null;
+  const pool = candidates;
+  let best: { template: TemplateMetadata; score: number } | null = null;
+  for (const t of pool) {
+    let score = 0;
+    const hay = normalizeTemplateQuery([
+      t.id,
+      t.name,
+      t.name_zh ?? '',
+      t.description,
+      t.description_zh ?? '',
+      t.tags.join(' '),
+      t.best_for.join(' '),
+      t.category,
+      t.subcategory ?? '',
+    ].join(' '));
+
+    if (t.engine === 'hyperframes' && (t.source_entry ?? '').endsWith('.html')) score += 18;
+    if (/^frame-design-/.test(t.id)) score += 22;
+    if (t.id === 'frame-design-cobalt-grid') score += 8;
+    if (t.id === 'frame-wechat-ai-dispatch') score += 6;
+
+    for (const token of q.split(/\s+/).filter((s) => s.length >= 2)) {
+      if (hay.includes(token)) score += token.length >= 4 ? 5 : 2;
+    }
+
+    if (/(报告|严肃|专业|分析|预测|经营|b2b|business|professional|analysis|forecast|report)/i.test(q)) {
+      if (/cobalt|grid|editorial|forest|nyt|chart|data|blue-professional|ledger|report/.test(hay)) score += 52;
+      if (/poster|glitch|play|warm|product-promo/.test(hay)) score -= 12;
+    }
+    if (/(ai|智能体|微信|小程序|调度|分发|agent|wechat|mini program)/i.test(q)) {
+      if (/wechat|ai-dispatch|dispatch|cobalt|grid|data/.test(hay)) score += 34;
+    }
+    if (/(数据|数字|图表|增长|指标|排名|趋势|data|chart|metric|trend|github|star)/i.test(q)) {
+      if (/data|chart|nyt|rollup|graph|cobalt|grid|metric/.test(hay)) score += 48;
+    }
+    if (/(产品|发布|推广|卖点|营销|promo|launch|product|brand)/i.test(q)) {
+      if (/product|promo|bold|poster|signal|creative|voltage|electric/.test(hay)) score += 38;
+    }
+    if (/(代码|开发|ide|github|repo|开源|程序员|developer|code|vscode)/i.test(q)) {
+      if (/vscode|cobalt|grid|data|github/.test(hay)) score += 38;
+    }
+    if (/(温暖|生活|故事|情绪|柔和|warm|grain|magazine|story)/i.test(q)) {
+      if (/warm|grain|magazine|editorial|forest|daisy/.test(hay)) score += 34;
+    }
+    if (/(logo|片尾|outro|结尾)/i.test(q)) {
+      if (/logo|outro/.test(hay)) score += 80;
+    }
+    if ((args.mode === 'narrate' || args.mode === 'talking-head') && /^frame-design-/.test(t.id)) {
+      score += 8;
+    }
+
+    if (!best || score > best.score || (score === best.score && t.id < best.template.id)) {
+      best = { template: t, score };
+    }
+  }
+  return best?.template ?? null;
+}
+
+function normalizeTemplateQuery(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function normalizeTemplateAspect(value: string): string {
+  const v = value.trim();
+  if (/9\s*:\s*16|1080\s*[:×x]\s*1920/i.test(v)) return '9:16';
+  if (/1\s*:\s*1|1080\s*[:×x]\s*1080/i.test(v)) return '1:1';
+  if (/4\s*:\s*5|1080\s*[:×x]\s*1350/i.test(v)) return '4:5';
+  return '16:9';
+}
+
+function templateSupportsAspect(t: TemplateMetadata, aspect: string): boolean {
+  const supported = t.output?.resolution?.supported_aspects;
+  return !Array.isArray(supported) || supported.length === 0 || supported.includes(aspect);
 }
 
 /**
@@ -2487,7 +2669,11 @@ function templatePreviewMode(
  *   3. once every timeline has registered, play them all on a loop.
  * Templates on disk are untouched — this is a serve-time transform only.
  */
-function injectCompositionPlayer(html: string, templateId: string): string {
+function injectCompositionPlayer(
+  html: string,
+  templateId: string,
+  options: { staticFrameIndex?: number; staticProgress?: number } = {},
+): string {
   // 15s is a sane default duration for the preview loop; __VIDEO_SRC__ has no
   // real asset in-repo, so point it at an empty data URI to avoid a 404 fetch.
   let out = html
@@ -2509,6 +2695,8 @@ function injectCompositionPlayer(html: string, templateId: string): string {
 <script>
 (function () {
   var templateAssetBase = ${JSON.stringify(`/template-asset/${templateId}/`)};
+  var staticFrameIndex = ${options.staticFrameIndex ?? 'null'};
+  var staticProgress = ${options.staticProgress ?? 0.68};
   function reexec(root) {
     // Cloned/innerHTML'd <script> nodes don't run — recreate them so each
     // composition's timeline-registration IIFE actually executes. Skip the
@@ -2546,17 +2734,41 @@ function injectCompositionPlayer(html: string, templateId: string): string {
     window.__timelines = window.__timelines || {};
     var hosts = Array.prototype.slice.call(
       document.querySelectorAll('[data-composition-src]'));
-    await Promise.all(hosts.map(mountOne));
+    var activeHosts = hosts;
+    if (staticFrameIndex !== null) {
+      activeHosts = hosts.filter(function (host, index) {
+        var active = index === Math.min(staticFrameIndex, hosts.length - 1);
+        host.style.display = active ? 'block' : 'none';
+        if (active) {
+          host.style.opacity = '1';
+          host.style.visibility = 'visible';
+          host.setAttribute('data-start', '0');
+        }
+        return active;
+      });
+    }
+    await Promise.all(activeHosts.map(mountOne));
     // Give the just-injected <script> tags a tick to register timelines.
     setTimeout(function () {
       var tls = window.__timelines || {};
       Object.keys(tls).forEach(function (k) {
         var tl = tls[k];
-        if (tl && typeof tl.play === 'function') {
+        if (!tl) return;
+        if (staticFrameIndex !== null && typeof tl.pause === 'function') {
+          try {
+            if (typeof tl.totalProgress === 'function') tl.totalProgress(staticProgress);
+            else if (typeof tl.progress === 'function') tl.progress(staticProgress);
+            tl.pause();
+          } catch (e) {}
+        } else if (typeof tl.play === 'function') {
           try { tl.repeat(-1); } catch (e) {}
           tl.play(0);
         }
       });
+      if (staticFrameIndex !== null) {
+        document.querySelectorAll('video').forEach(function (video) { try { video.pause(); } catch (e) {} });
+        document.documentElement.setAttribute('data-hv-static-ready', 'true');
+      }
     }, 120);
   }
   if (document.readyState === 'loading') {
@@ -2567,6 +2779,69 @@ function injectCompositionPlayer(html: string, templateId: string): string {
 
   if (out.includes('</body>')) return out.replace('</body>', player + '\n</body>');
   return out + player;
+}
+
+function injectStaticTemplatePreview(
+  html: string,
+  options: { frameIndex: number; progress: number },
+): string {
+  const freezeStyle = `<style id="__hv_static_freeze">
+    *, *::before, *::after { animation-play-state: paused !important; }
+    html, body { overflow: hidden !important; }
+    .__hv_static_stage { width: 1920px; height: 1080px; overflow: hidden; display: grid; place-items: center; background: #000; }
+    .__hv_static_stage > .frame { width: 1920px !important; height: 1080px !important; max-width: none !important; aspect-ratio: auto !important; margin: 0 !important; box-shadow: none !important; }
+  </style>`;
+  let out = html;
+  if (/<head[^>]*>/i.test(out)) out = out.replace(/<head[^>]*>/i, (head) => `${head}\n${freezeStyle}`);
+  else out = `${freezeStyle}\n${out}`;
+
+  const script = `<script>
+(function () {
+  var frameIndex = ${options.frameIndex};
+  var progress = ${options.progress};
+  function freeze() {
+    var frames = Array.prototype.slice.call(document.querySelectorAll('.frame'));
+    if (frames.length > 1) {
+      var picked = frames[Math.min(frameIndex, frames.length - 1)];
+      if (picked) {
+        var stage = document.createElement('main');
+        stage.className = '__hv_static_stage';
+        stage.appendChild(picked.cloneNode(true));
+        document.body.replaceChildren(stage);
+      }
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        document.getAnimations().forEach(function (animation) {
+          try {
+            var timing = animation.effect && animation.effect.getComputedTiming
+              ? animation.effect.getComputedTiming()
+              : null;
+            var end = timing && Number.isFinite(timing.endTime) ? timing.endTime : 1000;
+            animation.currentTime = Math.max(1, end * progress);
+            animation.pause();
+          } catch (e) {}
+        });
+        var tls = window.__timelines || {};
+        Object.keys(tls).forEach(function (key) {
+          var tl = tls[key];
+          try {
+            if (typeof tl.totalProgress === 'function') tl.totalProgress(progress);
+            else if (typeof tl.progress === 'function') tl.progress(progress);
+            if (typeof tl.pause === 'function') tl.pause();
+          } catch (e) {}
+        });
+        document.querySelectorAll('video').forEach(function (video) { try { video.pause(); } catch (e) {} });
+        document.documentElement.setAttribute('data-hv-static-ready', 'true');
+      });
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', freeze, { once: true });
+  else freeze();
+})();
+</script>`;
+  if (out.includes('</body>')) return out.replace('</body>', `${script}\n</body>`);
+  return out + script;
 }
 
 async function serveFile(filePath: string, res: ServerResponse): Promise<void> {
@@ -2952,7 +3227,7 @@ type ConvPhase =
   | 'iterate'
   // Post-generation iteration sub-flow:
   | 'edit-menu'        // ask what to change (style / content / duration)
-  | 'restyle'          // re-render every frame in a new style, text unchanged
+  | 'restyle'          // adapt the existing video content to a new template/style
   | 'iterate-content'  // re-plan the storyboard around new content
   | 'iterate-format';  // re-time / re-render with a new per-frame length
 
@@ -2974,6 +3249,7 @@ function detectPhase(
   hasTemplate: boolean,
   hasSourceMaterial = false,
   focusFrameId = '',
+  hasExistingStoryboard = false,
 ): PhaseResult {
   const trimmed = userText.trim();
   const inputs: PhaseInputs = {};
@@ -3019,7 +3295,7 @@ function detectPhase(
   // card-driven sub-flow: a vague "改一下" pops an edit-menu (change style /
   // content / duration); picking an option re-uses the existing style / content
   // / format cards; the final regeneration is based on the existing storyboard.
-  if (hadGenerationYet(history)) {
+  if (hadGenerationYet(history) || hasExistingStoryboard) {
     const last = lastAssistantCardWithMeta(history);
     // Mid-iteration: the user is answering one of the edit sub-flow cards.
     if (last?.metaPhase === 'edit-menu') {
@@ -3282,6 +3558,41 @@ function collectContentTurns(history: ChatMessage[]): string[] {
   return out.filter((t) => t !== '__TYPE_PICK__');
 }
 
+async function existingStoryboardSource(ctx: CliContext, projectId: string, project: Project): Promise<string> {
+  const lines: string[] = [];
+  const narration = project.soundtrack?.narrationText?.trim();
+  if (narration) {
+    lines.push('当前视频口播全文：');
+    lines.push(narration);
+  }
+  try {
+    const graph = await ctx.orchestrator.readContentGraph(projectId);
+    if (graph?.synopsis) {
+      lines.push('');
+      lines.push(`当前视频概要：${String(graph.synopsis).trim()}`);
+    }
+    if (Array.isArray(graph?.nodes) && graph.nodes.length > 0) {
+      lines.push('');
+      lines.push('当前分镜内容：');
+      for (let i = 0; i < graph.nodes.length; i++) {
+        const node = graph.nodes[i] as { text?: unknown; label?: unknown; id?: unknown };
+        const text = String(node.text ?? node.label ?? '').trim();
+        if (text) lines.push(`${i + 1}. ${text}`);
+      }
+    }
+  } catch {
+    // Best-effort; narration/current frames below are enough for template adaption.
+  }
+  if (!narration && project.frames?.length) {
+    lines.push('');
+    lines.push('当前帧顺序：');
+    for (const frame of [...project.frames].sort((a, b) => a.order - b.order)) {
+      lines.push(`${frame.order + 1}. ${frame.graphNodeId}`);
+    }
+  }
+  return lines.join('\n').trim();
+}
+
 /**
  * The video's LOCKED subject, in the user's own words. The opening message
  * ("帮我生成一个关于 Open Design 的介绍视频") names the subject, but it never
@@ -3498,6 +3809,29 @@ function renderDesignSpecBlock(specs: Attachment[]): string[] {
   return out;
 }
 
+function renderMotionExportContract(): string {
+  return [
+    'Canvas fill contract (REQUIRED): the page must fill the requested output viewport edge-to-edge.',
+    'Set html, body, and the single top-level scene/stage to margin:0, width:100%, height:100%, and overflow:hidden.',
+    'Do not center a smaller fixed canvas; do not constrain the root with max-width/max-height; do not apply root zoom or transform:scale(<1); do not letterbox.',
+    'Full-frame image/video backgrounds must use object-fit:cover, not contain. Keep text inside safe margins, but make the background/root reach all four edges.',
+    'Motion/export contract (REQUIRED): the animation must be real browser-recordable motion that survives MP4 export.',
+    'Use CSS @keyframes, a finite GSAP timeline that auto-plays, or requestAnimationFrame. The page must start motion by itself after load; do not rely on hover, scroll, clicks, or editor-only controls.',
+    'Include visible change across the first 0.3-1.5 seconds (position, opacity, scale, stroke-dashoffset, counter/bar growth, wipe, or scene reveal), and keep a stable final state for the rest of the frame.',
+    'Use finite animation iterations. Do not use CSS infinite loops, GSAP repeat:-1, Math.random(), Date.now(), or timer-driven randomness; export must be deterministic at every timestamp.',
+    'Do not output only a static end frame. Do not create paused-only timelines unless they are also exposed through window.__timelines and auto-play when opened normally.',
+  ].join('\n');
+}
+
+function extractHtmlFromAgentText(text: string): string | undefined {
+  const fenced = /```(?:html)?[^\n`]*\n([\s\S]*?)```/i.exec(text)?.[1]?.trim();
+  if (fenced) return fenced;
+  const doc = /<!doctype html[\s\S]*?<\/html>/i.exec(text)?.[0]?.trim();
+  if (doc) return doc;
+  const html = /<html[\s\S]*?<\/html>/i.exec(text)?.[0]?.trim();
+  return html || undefined;
+}
+
 /** LLMs emit not-quite-valid JSON for the content-graph more often than not:
  *  trailing commas, and (now that we ask them to quote article terms) stray
  *  straight double-quotes inside string values. Try strict parse first, then
@@ -3536,19 +3870,25 @@ function isMultiFrameType(pickedType: string): boolean {
   return !single;
 }
 
-function buildNeedTemplatePrompt(): string {
+function buildStylePhasePrompt(pickedType: string): string {
   const p: string[] = [];
-  p.push(`The project has NOT selected a template yet. Do NOT generate. Tell the user — in their language, ONE short friendly line — to pick a template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
+  p.push(`The user has shared their content for a "${pickedType}". Now ask them about visual style with ONE hv-options card. JSON shape EXACTLY as shown — keep "meta" verbatim:`);
   p.push('```hv-options');
   p.push(JSON.stringify({
-    meta: { phase: 'need-template' },
-    question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
+    meta: { phase: 'style' },
+    question: '视觉风格怎么定？',
     options: [
-      { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
+      { label: 'Cyberpunk glitch',    hint: '霓虹 / 故障感 / 高对比' },
+      { label: 'Swiss minimalist',    hint: '网格 / 无衬线 / 留白' },
+      { label: 'Warm-grain magazine', hint: '纸感 / 衬线 / 暖色' },
+      { label: 'Mono brutalist',      hint: '黑白 / 块状 / 粗体' },
+      { label: '从设计模板选',        hint: '上方挑一个现成模板' },
     ],
-    allow_freeform: false,
+    allow_freeform: true,
   }, null, 2));
   p.push('```');
+  p.push('');
+  p.push(`Add ONE short sentence above the card in the user's language inviting them to pick or describe a vibe. Mention they can also upload a reference image via the 📎 button.`);
   p.push('');
   p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
   return p.join('\n');
@@ -3640,7 +3980,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       p.push('');
       for (const a of attachments) p.push(...renderAttachment(a));
       p.push('');
-      p.push(`In the user's language, write ONE short line that names the actual topic/title you read from the source and states the video will be built from it (e.g. "好，我读完了《…》这篇文章 — 这就基于它生成。下一步选模板。"). Do NOT ask the user to retype or summarize anything. End with this hidden marker on its own line:`);
+      p.push(`In the user's language, write ONE short line that names the actual topic/title you read from the source and states the video will be built from it (e.g. "好，我读完了《…》这篇文章 — 这就基于它生成。下一步确认格式。"). Do NOT ask the user to retype or summarize anything. End with this hidden marker on its own line:`);
       p.push('<!-- hv-phase:content-question -->');
       p.push('');
       p.push(`Plain text + the marker only. NO code blocks. NO questions. Do NOT return an empty reply.`);
@@ -3672,7 +4012,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       p.push('');
       p.push(`Two options:`);
       p.push(`- If you still need more info: ask ONE clarifying question and end your reply with the marker on its own line: <!-- hv-phase:content-question -->`);
-      p.push(`- If you have enough: write ONLY a one-line confirmation in the user's language (e.g. "好，我有思路了，下一步选模板。" / "Got it. Next: pick a template."). Do NOT add the marker — the server will advance to template selection automatically.`);
+      p.push(`- If you have enough: write ONLY a one-line confirmation in the user's language (e.g. "好，我有思路了，系统会自动匹配模板，下一步确认格式。" / "Got it. I'll auto-match a template next."). Do NOT add the marker — the server will advance automatically.`);
     }
     p.push('');
     p.push(`Reply in plain text. NO code blocks. Do NOT return an empty reply.`);
@@ -3681,12 +4021,40 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
 
   // ---- style: legacy route; template selection is now the only visual choice ----
   if (phase === 'style') {
-    return buildNeedTemplatePrompt();
+    const p: string[] = [];
+    p.push(`Do NOT ask the user to choose an abstract visual style. Tell them — in their language, ONE short friendly line — to pick a concrete template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
+    p.push('```hv-options');
+    p.push(JSON.stringify({
+      meta: { phase: 'need-template' },
+      question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
+      options: [
+        { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
+      ],
+      allow_freeform: false,
+    }, null, 2));
+    p.push('```');
+    p.push('');
+    p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
+    return p.join('\n');
   }
 
   // ---- need-template: user chose "from design template" but hasn't picked one
   if (phase === 'need-template') {
-    return buildNeedTemplatePrompt();
+    const p: string[] = [];
+    p.push(`The project has NOT selected a template yet. Do NOT generate. Tell the user — in their language, ONE short friendly line — to pick a template from the top-bar 模板 / Template dropdown, then offer this card so they can confirm once they've picked. JSON shape EXACTLY — keep "meta" verbatim:`);
+    p.push('```hv-options');
+    p.push(JSON.stringify({
+      meta: { phase: 'need-template' },
+      question: '先在顶部「模板」里选一个模板，选好后点下面继续：',
+      options: [
+        { label: '我已选好模板，继续', hint: '用顶部选中的模板生成' },
+      ],
+      allow_freeform: false,
+    }, null, 2));
+    p.push('```');
+    p.push('');
+    p.push(`Do NOT write HTML this turn. Do NOT return an empty reply.`);
+    return p.join('\n');
   }
 
   // ---- format / format-edit: hv-form with 3 segmented controls ----
@@ -3891,11 +4259,24 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       }
     }
     p.push(`Constraints: full-bleed ${resolution}, opens with an animation timeline, inline CSS + JS, single complete <!doctype html>...</html> document(s). CDN imports (Tailwind, GSAP) are fine. Tag every visible text node with data-hv-text set to a stable key (brand_name, headline, item_1, cta…). No prose outside code blocks.`);
+    p.push(renderMotionExportContract());
     p.push('');
     // Frame-count safety: claude --print can truncate / stall on very large
     // multi-frame batches. Cap at 10 (high frame counts get progressively
     // less reliable in a single pass), and tell the model so it can plan.
     const requestedFrames = Math.max(1, Math.min(10, Number(collected.frame_count ?? '4') || 4));
+    const templateSubject = [...contentTurns, openingTopic ?? ''].filter(Boolean).join(' ');
+    const templateReference = tmpl && baseHtml
+      ? buildTemplateGenerationReference({
+          templateName: tmpl.name_zh ?? tmpl.name,
+          templateDescription: tmpl.description_zh ?? tmpl.description,
+          templateHtml: baseHtml,
+          index: 0,
+          total: requestedFrames,
+          text: templateSubject,
+          contentKind: /\d+(?:\.\d+)?/.test(templateSubject) ? 'data' : 'text',
+        })
+      : '';
     // ⚠️ FALLBACK ONLY. Real multi-frame generation goes through
     // runSplitMultiFrameGenerate (the server routes frame_count>1 there before
     // ever reaching this single-shot prompt). This branch only fires if that
@@ -3907,7 +4288,7 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
       p.push(`1. ONE \`\`\`json#content-graph block.`);
       p.push(`2. ONE \`\`\`html#<nodeId> block per node.`);
       p.push('');
-      p.push(`Aim for ${requestedFrames} frames. Each frame should be self-contained, full-bleed ${resolution}, with its own opening animation. Nothing between blocks.`);
+      p.push(`Aim for ${requestedFrames} frames. Each frame should be self-contained, full-bleed ${resolution}, with its own opening animation and visible movement during export. Nothing between blocks.`);
       p.push('');
       if (attachments.length > 0) {
         // The agent has, in practice, been handed the full article yet fallen
@@ -3948,32 +4329,36 @@ function buildHtmlGenerationPrompt(args: BuildPromptArgs): string {
 html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,sans-serif}
 .stage{width:100vw;height:100vh;display:grid;place-items:center;text-align:center;padding:0}
 h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;transform:translateY(24px)}
+.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out 2 alternate}
 @keyframes in{to{opacity:1;transform:none}}
+@keyframes move{to{transform:translateX(64vw) scale(.72);filter:hue-rotate(70deg)}}
 </style></head><body>
-<div class="stage"><h1 data-hv-text="headline">PLACEHOLDER</h1></div>
+<div class="stage"><h1 data-hv-text="headline">PLACEHOLDER</h1><div class="pulse"></div></div>
 </body></html>`);
       p.push('```');
       p.push('');
       p.push(`(continue with the same shape for the remaining frames — \`\`\`html#frame_2 … \`\`\`html#frame_${requestedFrames})`);
       if (baseHtml && baseHtml.length > 0) {
         p.push('');
-        p.push(tmpl
-          ? `Template HTML — this is the REQUIRED visual style. Reuse its palette, layout, typography, and animation approach; change only the text/data to fit the source material. Do NOT switch to a different look (no dark "cosmic particle" default, etc.):`
-          : `Prior preview HTML to draw style from:`);
-        p.push('```html');
-        p.push(baseHtml.slice(0, 3000));
-        p.push('```');
+        if (templateReference) p.push(templateReference);
+        else {
+          p.push(`Prior preview HTML to draw style from:`);
+          p.push('```html');
+          p.push(baseHtml.slice(0, 3000));
+          p.push('```');
+        }
       }
     } else {
       p.push(`Output (single-frame): begin your reply with \`\`\`html and end with \`\`\`. Nothing outside the block.`);
       p.push('');
       if (baseHtml && baseHtml.length > 0) {
-        p.push(tmpl
-          ? `Template HTML — this is the REQUIRED visual style. Reuse its palette, layout, typography, and animation approach; change only the text/data to fit the source material. Do NOT switch to a different look:`
-          : `Prior preview HTML (iterate on its visual style if it fits, or replace if a different vibe is better):`);
-        p.push('```html');
-        p.push(baseHtml.slice(0, 4000));
-        p.push('```');
+        if (templateReference) p.push(templateReference);
+        else {
+          p.push(`Prior preview HTML (iterate on its visual style if it fits, or replace if a different vibe is better):`);
+          p.push('```html');
+          p.push(baseHtml.slice(0, 4000));
+          p.push('```');
+        }
       } else {
         p.push(`Skeleton to extend (replace placeholder with the inputs above; expand styling per the chosen type / style):`);
         p.push('```html');
@@ -3982,9 +4367,11 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
 html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,sans-serif}
 .stage{width:100vw;height:100vh;display:grid;place-items:center;text-align:center;padding:0}
 h1{font-size:8vw;letter-spacing:-.03em;animation:in 1.2s ease forwards;opacity:0;transform:translateY(24px)}
+.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out 2 alternate}
 @keyframes in{to{opacity:1;transform:none}}
+@keyframes move{to{transform:translateX(64vw) scale(.72);filter:hue-rotate(70deg)}}
 </style></head><body>
-<div class="stage"><h1 data-hv-text="headline">PLACEHOLDER</h1></div>
+<div class="stage"><h1 data-hv-text="headline">PLACEHOLDER</h1><div class="pulse"></div></div>
 </body></html>`);
         p.push('```');
       }
@@ -4181,6 +4568,8 @@ interface SplitGenerateArgs {
   priorHtml: string;
   inputs: PhaseInputs;
   attachments: Attachment[];
+  /** Exact per-frame source text used when agent planning is unavailable. */
+  fallbackFrameTexts?: string[];
   /** The user's original opening subject, locked across phases. */
   openingTopic?: string;
   /**
@@ -4189,6 +4578,8 @@ interface SplitGenerateArgs {
    * re-plan. Used by the post-generation "换风格 / 改时长" sub-flows.
    */
   restyleOnly?: boolean;
+  /** Quality-critical flows should stop instead of silently rendering all-local frames. */
+  failOnAgentError?: boolean;
   /** Called for human-readable progress lines. */
   onProgress: (msg: string) => void;
   /** Called for structured SSE events. */
@@ -4204,7 +4595,7 @@ interface SplitGenerateArgs {
 async function runSplitMultiFrameGenerate(
   args: SplitGenerateArgs,
 ): Promise<{ frameCount: number; intent: string }> {
-  const { ctx, projectId, projectDir, agentDef, agentModel, tmpl, priorHtml, inputs, attachments, openingTopic, restyleOnly, onProgress, onSse } = args;
+  const { ctx, projectId, projectDir, agentDef, agentModel, tmpl, priorHtml, inputs, attachments, fallbackFrameTexts, openingTopic, restyleOnly, failOnAgentError, onProgress, onSse } = args;
   const collected = inputs.collected ?? {};
   const pickedType = inputs.pickedType ?? '';
   const pickedStyle = inputs.pickedStyle ?? '';
@@ -4215,13 +4606,7 @@ async function runSplitMultiFrameGenerate(
   // template (e.g. Swiss Grid: light grey + black/gold serif) came out as a
   // generic dark theme. Read the real source once and force it into each frame.
   let templateHtml = '';
-  if (tmpl?.__dir && tmpl.source_entry) {
-    try {
-      const { readFileSync } = await import('node:fs');
-      const p = join(tmpl.__dir, tmpl.source_entry);
-      if (existsSync(p)) templateHtml = readFileSync(p, 'utf8');
-    } catch { /* fall back to description-only */ }
-  }
+  if (tmpl?.__dir && tmpl.source_entry) templateHtml = await loadTemplateGenerationSource(tmpl);
   const aspect = ((collected.aspect ?? '16:9').split(/\s+/)[0] ?? '16:9');
   const frameCountReq = Math.max(2, Math.min(10, Number(collected.frame_count ?? '4') || 4));
   // Opt-in (format card): render data frames natively with Remotion. When on,
@@ -4303,6 +4688,12 @@ async function runSplitMultiFrameGenerate(
     }
   }
   if (styleLabel) graphPromptParts.push(`- 风格 / style: ${styleLabel}`);
+  const templateBrief = selectedTemplateStructureBrief(templateHtml);
+  if (templateBrief) {
+    graphPromptParts.push(`- 已选模板结构 / selected template structure:`);
+    graphPromptParts.push(templateBrief);
+    graphPromptParts.push(`  Re-plan the storyboard so each frame's content fits the matching template structure. For list/ledger frames, provide multiple short comparable points. For metric/bar/stat frames, prefer concise labels and real numbers if present. For hero/quote frames, use one strong short sentence. Do not merely copy the old frame text into every slot.`);
+  }
   graphPromptParts.push(`- 总时长: ${totalDurationSec}s split across ${frameCountReq} frames (~${perFrameDurationSec}s each)`);
   graphPromptParts.push('');
   if (sourceTexts.length > 0) {
@@ -4353,19 +4744,68 @@ async function runSplitMultiFrameGenerate(
   graphPromptParts.push(`STRICT JSON: the block must be valid JSON. Inside string values do NOT use straight double-quotes ("…") — if you need to quote a term or title, use 「」 or 《》 or single quotes. No trailing commas. No comments.`);
 
   const graphPrompt = graphPromptParts.join('\n');
-  const graphText = await callAgentSimple(agentDef, graphPrompt, projectDir, agentModel);
+  let graphText = '';
+  let graphAgentFailure = '';
+  try {
+    graphText = await callAgentSimple(agentDef, graphPrompt, projectDir, agentModel);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (failOnAgentError) {
+      throw new Error(`故事板规划调用失败：${summarizeAgentFailure(message)}`);
+    }
+    graphAgentFailure = message;
+    onProgress(`↻ 故事板规划调用失败：${summarizeAgentFailure(message)}；使用本地模板适配规划`);
+    process.stderr.write(`[studio:split] proj=${projectId} graph agent failed: ${message}; using local template-adapted graph\n`);
+  }
   const graphMatch = /```json#content-graph\s*\n([\s\S]*?)```/i.exec(graphText)
     ?? /```json\s*\n([\s\S]*?)```/i.exec(graphText);
   if (!graphMatch || !graphMatch[1]) {
-    throw new Error(`agent did not return a content-graph (got ${graphText.length} bytes, head: ${graphText.slice(0, 80)})`);
-  }
-  try {
-    graph = parseGraphJsonTolerant(graphMatch[1].trim()) as import('@html-video/content-graph').ContentGraph;
-  } catch (e) {
-    throw new Error(`graph JSON failed to parse: ${e instanceof Error ? e.message : e}`);
+    const reason = `agent did not return a content-graph (got ${graphText.length} bytes)`;
+    if (!graphAgentFailure) onProgress(`↻ 故事板规划未返回内容图，使用本地模板适配规划`);
+    graph = buildLocalTemplateAdaptedGraph({
+      frameCount: frameCountReq,
+      perFrameDurationSec,
+      contentTurns,
+      openingTopic,
+      sourceTexts: sourceTexts.map((a) => a.inlineText ?? ''),
+      frameTexts: fallbackFrameTexts,
+      templateHtml,
+      fallbackSynopsis: pickedType || tmpl?.name_zh || tmpl?.name || '模板适配视频',
+    });
+    process.stderr.write(`[studio:split] proj=${projectId} ${reason}; using local template-adapted graph\n`);
+  } else {
+    try {
+      graph = parseGraphJsonTolerant(graphMatch[1].trim()) as import('@html-video/content-graph').ContentGraph;
+    } catch (e) {
+      onProgress(`↻ 故事板 JSON 解析失败，使用本地模板适配规划`);
+      graph = buildLocalTemplateAdaptedGraph({
+        frameCount: frameCountReq,
+        perFrameDurationSec,
+        contentTurns,
+        openingTopic,
+        sourceTexts: sourceTexts.map((a) => a.inlineText ?? ''),
+        frameTexts: fallbackFrameTexts,
+        templateHtml,
+        fallbackSynopsis: pickedType || tmpl?.name_zh || tmpl?.name || '模板适配视频',
+      });
+      process.stderr.write(`[studio:split] proj=${projectId} graph JSON parse failed: ${e instanceof Error ? e.message : e}; using local template-adapted graph\n`);
+    }
   }
   if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
     throw new Error('graph has no nodes');
+  }
+  if (!restyleOnly && graph.nodes.length !== frameCountReq) {
+    onProgress(`↻ 故事板返回 ${graph.nodes.length} 帧，按请求的 ${frameCountReq} 帧重新本地规划`);
+    graph = buildLocalTemplateAdaptedGraph({
+      frameCount: frameCountReq,
+      perFrameDurationSec,
+      contentTurns,
+      openingTopic,
+      sourceTexts: sourceTexts.map((a) => a.inlineText ?? ''),
+      frameTexts: fallbackFrameTexts,
+      templateHtml,
+      fallbackSynopsis: pickedType || tmpl?.name_zh || tmpl?.name || '模板适配视频',
+    });
   }
   await ctx.orchestrator.writeContentGraph(projectId, graph);
   onProgress(`✓ 故事板规划完成：${graph.nodes.length} 帧 (${graph.intent})`);
@@ -4380,6 +4820,36 @@ async function runSplitMultiFrameGenerate(
     onSse({ type: 'frame_started', node_id: nodeId, order: i, total: graph.nodes.length });
 
     const frameContext = describeNode(node);
+    const frameTextForLocal = templateTextFromGraphNode(node, frameContext);
+    const templateReference = templateHtml && tmpl
+      ? buildTemplateGenerationReference({
+          templateName: tmpl.name_zh ?? tmpl.name,
+          templateDescription: tmpl.description_zh ?? tmpl.description,
+          templateHtml,
+          index: i,
+          total: graph.nodes.length,
+          text: frameTextForLocal,
+          contentKind: node.kind,
+        })
+      : '';
+    const localTemplateFrame = localTemplateFrameHtml({
+      index: i,
+      total: graph.nodes.length,
+      text: frameTextForLocal,
+      synopsis: graph.synopsis ?? '',
+      contentKind: node.kind,
+      structuredData: node.kind === 'data'
+        ? node.data as LocalTemplateFrameArgs['structuredData']
+        : undefined,
+      type: pickedType || '分镜字幕',
+      style: styleLabel || tmpl?.name || pickedStyle || '',
+      captionMode: '关键句',
+      templateId: tmpl?.id,
+      templateName: tmpl?.name_zh ?? tmpl?.name,
+      templateHtml,
+      templateDir: tmpl?.__dir,
+      templatePosterUrl: templatePosterFileUrl(tmpl),
+    });
     const fp: string[] = [];
     fp.push(`Generate ONE complete HTML page for frame "${nodeId}" of a ${graph.nodes.length}-frame video. Output ONE \`\`\`html block, nothing else.`);
     fp.push('');
@@ -4395,6 +4865,9 @@ async function runSplitMultiFrameGenerate(
     fp.push(`Type: ${pickedType}`);
     if (styleLabel) fp.push(`Style: ${styleLabel}`);
     fp.push(`Resolution: ${aspect} (${resolution})`);
+    fp.push('');
+    fp.push(`CONTENT-DIRECTED DESIGN (REQUIRED): interpret this frame's meaning before choosing the composition. Decide what the viewer must notice first, which relationship or fact the layout should explain, and what the animation should reveal. Do not render the narration as a generic subtitle card and do not copy the template sample composition verbatim.`);
+    fp.push(`The selected template is a design system and structural vocabulary, not a fill-in-the-blanks form. Choose and adapt the template structure that best communicates THIS frame's content while preserving its visual identity.`);
     fp.push('');
     if (contentTurns.length > 0) {
       fp.push(`Source material from the user (use literally; do NOT invent facts):`);
@@ -4413,13 +4886,10 @@ async function runSplitMultiFrameGenerate(
       fp.push('');
     }
     fp.push(`Output: begin with \`\`\`html and end with \`\`\`. Inline CSS + JS, full-bleed ${resolution}, opens with an animation timeline. Tag visible text with data-hv-text. CDN imports (Tailwind, GSAP) fine. No prose outside the block.`);
+    fp.push(renderMotionExportContract());
     fp.push('');
-    if (templateHtml) {
-      // A template is selected → its HTML is the REQUIRED look for every frame.
-      fp.push(`Template HTML — this is the REQUIRED visual style for THIS frame. Reuse its exact palette, background, typography, layout structure and animation approach; only swap in this frame's text/data. Do NOT invent a different theme (no generic dark background unless the template itself is dark):`);
-      fp.push('```html');
-      fp.push(templateHtml.slice(0, 4000));
-      fp.push('```');
+    if (templateReference) {
+      fp.push(templateReference);
       fp.push('');
       fp.push(`Keep all ${graph.nodes.length} frames visually consistent with this template so they read as one video.`);
     } else {
@@ -4430,9 +4900,11 @@ async function runSplitMultiFrameGenerate(
 html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;font-family:system-ui,sans-serif}
 .stage{width:100vw;height:100vh;display:grid;place-items:center;text-align:center;padding:0}
 h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;transform:translateY(24px)}
+.pulse{position:absolute;left:12vw;bottom:14vh;width:8vw;height:8vw;border-radius:999px;background:#22e6a8;animation:move 2.4s ease-in-out 2 alternate}
 @keyframes in{to{opacity:1;transform:none}}
+@keyframes move{to{transform:translateX(64vw) scale(.72);filter:hue-rotate(70deg)}}
 </style></head><body>
-<div class="stage"><h1 data-hv-text="headline">PLACEHOLDER</h1></div>
+<div class="stage"><h1 data-hv-text="headline">PLACEHOLDER</h1><div class="pulse"></div></div>
 </body></html>`);
       fp.push('```');
       if (priorHtml && priorHtml.length > 0) {
@@ -4452,20 +4924,70 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
     fp.push(`Do NOT return an empty reply. Output the full HTML.`);
 
     const framePrompt = fp.join('\n');
-    let frameText = await callAgentSimple(agentDef, framePrompt, projectDir, agentModel);
-    let extracted = /```html\s*\n([\s\S]*?)```/i.exec(frameText)?.[1]?.trim()
-      ?? /<!doctype html[\s\S]*?<\/html>/i.exec(frameText)?.[0];
+    let frameText = '';
+    const frameFailures: string[] = [];
+    try {
+      frameText = await callAgentSimple(agentDef, framePrompt, projectDir, agentModel);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (failOnAgentError) {
+        throw new Error(`第 ${i + 1} 帧 agent 调用失败：${summarizeAgentFailure(message)}`);
+      }
+      frameFailures.push(message);
+      onProgress(`  ↻ 第 ${i + 1} 帧调用失败：${summarizeAgentFailure(message)}；尝试精简重试…`);
+      process.stderr.write(`[studio:split-generate] proj=${projectId} frame=${nodeId} agent failed: ${message}\n`);
+    }
+    let extracted = extractHtmlFromAgentText(frameText);
 
     // One retry on empty: shorter prompt, just the skeleton call.
     if (!extracted) {
-      onProgress(`  ↻ 第 ${i + 1} 帧首试为空，重试…`);
-      const retryPrompt = `Output ONE complete HTML video frame in a fenced \`\`\`html block. Frame purpose: ${frameContext}. Style: ${styleLabel || 'tasteful default'}. Resolution: ${resolution}. ${contentTurns.length ? `Content: ${contentTurns.join(' / ').slice(0, 200)}` : ''} \n\nBegin your reply with \`\`\`html. Inline CSS, opens with animation, tag text with data-hv-text. No prose.`;
-      frameText = await callAgentSimple(agentDef, retryPrompt, projectDir, agentModel);
-      extracted = /```html\s*\n([\s\S]*?)```/i.exec(frameText)?.[1]?.trim()
-        ?? /<!doctype html[\s\S]*?<\/html>/i.exec(frameText)?.[0];
+      if (frameFailures.length === 0) onProgress(`  ↻ 第 ${i + 1} 帧未返回可用 HTML，重试…`);
+      const retryPrompt = [
+        `Output ONE complete HTML video frame in a fenced \`\`\`html block.`,
+        `Frame purpose: ${frameContext}.`,
+        `Style: ${styleLabel || 'tasteful default'}.`,
+        `Resolution: ${resolution}.`,
+        contentTurns.length ? `Content: ${contentTurns.join(' / ').slice(0, 200)}` : '',
+        templateReference
+          ? templateReference
+          : '',
+        `Begin your reply with \`\`\`html. Inline CSS, opens with animation, tag text with data-hv-text. No prose.`,
+        renderMotionExportContract(),
+      ].filter(Boolean).join('\n\n');
+      try {
+        frameText = await callAgentSimple(agentDef, retryPrompt, projectDir, agentModel);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        frameFailures.push(message);
+        process.stderr.write(`[studio:split-generate] proj=${projectId} frame=${nodeId} retry failed: ${message}\n`);
+        frameText = '';
+      }
+      extracted = extractHtmlFromAgentText(frameText);
     }
     if (!extracted) {
-      throw new Error(`frame "${nodeId}" generation returned empty (${frameText.length}B)`);
+      process.stderr.write(
+        `[studio:split-generate] proj=${projectId} frame=${nodeId} no usable agent HTML; failures=${frameFailures.length}; using local fallback (${frameText.length}B)\n`,
+      );
+      onProgress(frameFailures.length > 0
+        ? `  ⚠️ 第 ${i + 1} 帧两次 agent 调用失败，使用已选模板的本地兜底帧`
+        : `  ⚠️ 第 ${i + 1} 帧两次均未返回可用 HTML，使用已选模板的本地兜底帧`);
+      const fallbackText = 'text' in node && typeof node.text === 'string'
+        ? node.text
+        : describeNode(node);
+      extracted = localTemplateFrame ?? localTranscriptFrameHtml({
+        index: i,
+        total: graph.nodes.length,
+        text: fallbackText,
+        synopsis: graph.synopsis ?? '',
+        type: pickedType || '分镜字幕',
+        style: styleLabel || tmpl?.name || pickedStyle || '现代科技发布会',
+        captionMode: '关键句',
+        templateId: tmpl?.id,
+        templateName: tmpl?.name_zh ?? tmpl?.name,
+        templateHtml,
+        templateDir: tmpl?.__dir,
+        templatePosterUrl: templatePosterFileUrl(tmpl),
+      });
     }
     await ctx.orchestrator.writeFrameHtml(projectId, nodeId, extracted);
     // Native Remotion enhancement (opt-in via format card). The frame now has a
@@ -4824,6 +5346,15 @@ async function generateLocalTalkingHeadStoryboard(
 ): Promise<{ frameCount: number }> {
   const options = normalizeLocalTalkingHeadOptions(optionsInput ?? {});
   await applyLocalTalkingHeadProjectOptions(ctx, projectId, options);
+  const project = await ctx.projects.load(projectId);
+  const tmpl = project.templateId ? ctx.templates.get(project.templateId) : null;
+  let templateHtml = '';
+  if (tmpl?.__dir && tmpl.source_entry) {
+    const templatePath = join(tmpl.__dir, tmpl.source_entry);
+    if (existsSync(templatePath)) {
+      templateHtml = await readFile(templatePath, 'utf8');
+    }
+  }
   const segments = buildTranscriptFrameSegments(transcript, Number(options.frame_count) || 4);
   if (segments.length === 0) {
     throw new Error('transcript has no usable text segments');
@@ -4856,8 +5387,13 @@ async function generateLocalTalkingHeadStoryboard(
       text: nodes[i]!.text,
       synopsis: graph.synopsis ?? '',
       type: options.type,
-      style: options.style,
+      style: options.template_label || options.style,
       captionMode: options.caption_mode,
+      templateId: tmpl?.id,
+      templateName: tmpl?.name_zh ?? tmpl?.name,
+      templateHtml,
+      templateDir: tmpl?.__dir,
+      templatePosterUrl: templatePosterFileUrl(tmpl),
     }));
   }
   return { frameCount: nodes.length };
@@ -4877,11 +5413,56 @@ async function applyLocalTalkingHeadProjectOptions(
   await ctx.projects.save(project);
 }
 
-function resolutionForAspect(aspect: string): [number, number] {
+export function resolutionForAspect(aspect: string): [number, number] {
   if (aspect.startsWith('9:16')) return [1080, 1920];
   if (aspect.startsWith('1:1')) return [1080, 1080];
   if (aspect.startsWith('4:5')) return [1080, 1350];
   return [1920, 1080];
+}
+
+/**
+ * Exact, deterministic fallback for voiceover segmentation. It prefers nearby
+ * sentence/clause boundaries but never rewrites or drops source characters.
+ */
+export function splitNarrationSegments(script: string, requestedCount: number): string[] {
+  const chars = Array.from(script);
+  if (chars.length === 0) return [];
+  const count = Math.max(1, Math.min(Math.floor(requestedCount) || 1, chars.length));
+  if (count === 1) return [script];
+
+  const preferred = new Set(['。', '！', '？', '!', '?', '；', ';', '，', ',', '、', ':', '：']);
+  const boundaries: number[] = [];
+  let previous = 0;
+  for (let part = 1; part < count; part++) {
+    const minimum = previous + 1;
+    const maximum = chars.length - (count - part);
+    const ideal = Math.max(minimum, Math.min(maximum, Math.round((chars.length * part) / count)));
+    let selected = ideal;
+    const searchRadius = Math.min(Math.max(12, Math.round(chars.length / count)), maximum - minimum);
+    for (let distance = 0; distance <= searchRadius; distance++) {
+      const candidates = distance === 0 ? [ideal] : [ideal - distance, ideal + distance];
+      const match = candidates.find((candidate) => {
+        if (candidate < minimum || candidate > maximum) return false;
+        const before = chars[candidate - 1] ?? '';
+        const after = chars[candidate] ?? '';
+        return preferred.has(before) || /\s/.test(before) || /\s/.test(after);
+      });
+      if (match !== undefined) {
+        selected = match;
+        break;
+      }
+    }
+    boundaries.push(selected);
+    previous = selected;
+  }
+
+  const parts: string[] = [];
+  let start = 0;
+  for (const end of [...boundaries, chars.length]) {
+    parts.push(chars.slice(start, end).join(''));
+    start = end;
+  }
+  return parts;
 }
 
 function buildTranscriptFrameSegments(
@@ -4939,15 +5520,30 @@ function totalTranscriptDuration(transcript: import('@html-video/core').Transcri
   return Math.max(0, (last?.endSec ?? 0) - (first?.startSec ?? 0));
 }
 
-function localTranscriptFrameHtml(args: {
+type LocalTemplateFrameArgs = {
   index: number;
   total: number;
   text: string;
   synopsis: string;
+  contentKind?: 'text' | 'data' | 'entity';
+  structuredData?: {
+    title?: string;
+    unit?: string;
+    items: Array<{ label: string; value: number; note?: string }>;
+  };
   type?: string;
   style?: string;
   captionMode?: string;
-}): string {
+  templateId?: string;
+  templateName?: string;
+  templateHtml?: string;
+  templateDir?: string;
+  templatePosterUrl?: string;
+};
+
+function localTranscriptFrameHtml(args: LocalTemplateFrameArgs): string {
+  const templateFrame = localTemplateFrameHtml(args);
+  if (templateFrame) return templateFrame;
   const safeText = escapeHtml(args.text);
   const safeSynopsis = escapeHtml(args.synopsis);
   const safeType = escapeHtml(args.type ?? '口播字幕');
@@ -5055,6 +5651,1006 @@ function localTranscriptFrameHtml(args: {
 </html>`;
 }
 
+function localTemplateFrameHtml(args: LocalTemplateFrameArgs): string | undefined {
+  const templateKey = `${args.templateId ?? ''} ${args.templateName ?? ''} ${args.style ?? ''}`;
+  if (/WeChat AI Dispatch|微信 AI|微信 AI 调度|frame-wechat-ai-dispatch/i.test(templateKey)) {
+    return localWechatAiDispatchTranscriptFrameHtml(args);
+  }
+  if (args.templateHtml?.trim() || args.templatePosterUrl) {
+    return localGenericSelectedTemplateFrameHtml(args);
+  }
+  return undefined;
+}
+
+function localGenericSelectedTemplateFrameHtml(args: LocalTemplateFrameArgs): string {
+  const structuredFrame = localStructuredTemplateFrameHtml(args);
+  if (structuredFrame) return structuredFrame;
+  const safeText = escapeHtml(args.text);
+  const safeSynopsis = escapeHtml(args.synopsis);
+  const safeType = escapeHtml(args.type ?? '口播字幕');
+  const safeTemplateName = escapeHtml(args.templateName ?? args.templateId ?? 'Selected template');
+  const htmlTemplate = isRenderableHtmlTemplate(args.templateHtml ?? '');
+  const srcdoc = htmlTemplate
+    ? escapeHtmlAttr(withTemplateBaseHref(args.templateHtml ?? '', args.templateDir))
+    : '';
+  const safePosterUrl = args.templatePosterUrl ? escapeHtmlAttr(args.templatePosterUrl) : '';
+  const templateLayer = htmlTemplate
+    ? `<iframe class="template" srcdoc="${srcdoc}" aria-hidden="true"></iframe>`
+    : safePosterUrl
+      ? `<img class="template" src="${safePosterUrl}" alt="" aria-hidden="true" />`
+      : `<div class="template template-empty" aria-hidden="true"></div>`;
+  const frameNo = String(args.index + 1).padStart(2, '0');
+  const frameTotal = String(args.total).padStart(2, '0');
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Selected template transcript frame</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #101114; }
+    body { font-family: Inter, "SF Pro Display", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; color: #f8f5ee; }
+    .template {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
+      object-fit: cover;
+      opacity: .86;
+      transform: scale(1.01);
+      transform-origin: center;
+      animation: templateDrift 8s ease-in-out 2 alternate;
+    }
+    .shade {
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(0,0,0,.64), rgba(0,0,0,.18) 48%, rgba(0,0,0,.44)),
+        linear-gradient(0deg, rgba(0,0,0,.72), transparent 42%, rgba(0,0,0,.34));
+      pointer-events: none;
+    }
+    .chrome {
+      position: absolute;
+      inset: 54px 66px;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 28px;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 24px;
+      font-size: 18px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      opacity: 0;
+      transform: translateY(-14px);
+      animation: in .55s ease-out .2s forwards;
+    }
+    .template-name { max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 780; }
+    .counter { font-variant-numeric: tabular-nums; color: rgba(248,245,238,.72); }
+    .copy {
+      align-self: end;
+      width: min(980px, 78vw);
+      padding: 36px 40px 34px;
+      border: 1px solid rgba(248,245,238,.42);
+      background: rgba(12,13,14,.70);
+      box-shadow: 0 24px 70px rgba(0,0,0,.36);
+      backdrop-filter: blur(10px);
+      opacity: 0;
+      transform: translateY(34px);
+      animation: in .7s cubic-bezier(.16,1,.3,1) .38s forwards;
+    }
+    .type {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      color: rgba(248,245,238,.78);
+      font-size: 17px;
+      font-weight: 760;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+    }
+    .type::before { content: ""; width: 38px; height: 3px; background: currentColor; }
+    h1 {
+      margin: 0;
+      max-width: 16ch;
+      font-size: clamp(44px, 6.3vw, 108px);
+      line-height: .98;
+      font-weight: 850;
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
+    .synopsis {
+      margin-top: 24px;
+      max-width: 760px;
+      color: rgba(248,245,238,.72);
+      font-size: clamp(18px, 1.6vw, 26px);
+      line-height: 1.42;
+    }
+    .bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      color: rgba(248,245,238,.70);
+      font-size: 16px;
+      letter-spacing: .06em;
+      opacity: 0;
+      transform: translateY(14px);
+      animation: in .55s ease-out .74s forwards;
+    }
+    .rule { flex: 1; height: 1px; background: rgba(248,245,238,.46); }
+    @keyframes in { to { opacity: 1; transform: translateY(0); } }
+    @keyframes templateDrift { from { transform: scale(1.01) translate3d(0,0,0); } to { transform: scale(1.035) translate3d(-.7%, -.5%, 0); } }
+  </style>
+</head>
+<body>
+  ${templateLayer}
+  <div class="shade"></div>
+  <main class="chrome">
+    <header class="topbar">
+      <div class="template-name">${safeTemplateName}</div>
+      <div class="counter">${frameNo} / ${frameTotal}</div>
+    </header>
+    <section class="copy">
+      <div class="type">${safeType}</div>
+      <h1 data-hv-text="headline">${safeText}</h1>
+      <div class="synopsis" data-hv-text="context">${safeSynopsis}</div>
+    </section>
+    <footer class="bottom">
+      <span>SELECTED TEMPLATE</span>
+      <span class="rule"></span>
+      <span>TRANSCRIPT FRAME</span>
+    </footer>
+  </main>
+</body>
+</html>`;
+}
+
+function localStructuredTemplateFrameHtml(args: LocalTemplateFrameArgs): string | undefined {
+  const templateHtml = args.templateHtml ?? '';
+  if (!isRenderableHtmlTemplate(templateHtml)) return undefined;
+  const frameBlocks = extractTemplateFrameBlocks(templateHtml);
+  if (frameBlocks.length === 0) return undefined;
+  const css = extractTemplateStyles(templateHtml);
+  const frame = selectTemplateFrameBlock(frameBlocks, args);
+  if (!frame) return undefined;
+  const structuredItems = args.structuredData?.items ?? [];
+  const itemTitles = structuredItems.length > 0
+    ? structuredItems.slice(0, 4).map((item) => truncateZh(item.label, 18))
+    : templateFrameItemTitles(args.text, args.index);
+  const itemDescriptions = structuredItems.length > 0
+    ? structuredItems.slice(0, 4).map((item) => truncateZh(item.note || item.label, 22))
+    : templateFrameItemDescriptions(args.text, itemTitles, args.index);
+  const metricValues = structuredItems.length > 0
+    ? structuredItems.slice(0, 4).map((item) => `${item.value}${args.structuredData?.unit ?? ''}`)
+    : templateFrameMetricValues(args.text, args.index);
+  const data = {
+    headline: headlineFromNarrationText(args.text),
+    context: shortFrameContext(args.text),
+    synopsis: shortFrameContext(args.synopsis || args.text),
+    type: args.type ?? '口播字幕',
+    frameNo: `${String(args.index + 1).padStart(2, '0')} / ${String(args.total).padStart(2, '0')}`,
+    templateName: args.templateName ?? args.templateId ?? 'Selected template',
+    sentences: splitFrameSentences(args.text, 4),
+    itemTitles,
+    itemDescriptions,
+    metricValues,
+  };
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(args.templateName ?? args.templateId ?? 'Template frame')}</title>
+  ${args.templateDir ? `<base href="${escapeHtmlAttr(templateDirectoryFileUrl(args.templateDir))}">` : ''}
+  <style>
+${css}
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+    .hv-template-stage {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      background: inherit;
+    }
+    .hv-template-stage > .frame {
+      width: 100vw;
+      height: 100vh;
+      aspect-ratio: auto;
+      box-shadow: none;
+      animation: hvFrameIn 1.05s cubic-bezier(.16,1,.3,1) both;
+    }
+    .hv-template-stage > .frame h1,
+    .hv-template-stage > .frame h2,
+    .hv-template-stage > .frame h3,
+    .hv-template-stage > .frame .nm,
+    .hv-template-stage > .frame .dx,
+    .hv-template-stage > .frame .lede,
+    .hv-template-stage > .frame .ed {
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+    .hv-template-stage > .frame .glitch .step,
+    .hv-template-stage > .frame [class*="glitch"] .step {
+      animation: hvGlitchDrift 6.2s ease-in-out 2 alternate;
+    }
+    .hv-template-stage > .frame .ht {
+      transform-origin: left center;
+      animation: hvRuleDraw 1.05s cubic-bezier(.16,1,.3,1) .08s both;
+    }
+    .hv-template-stage > .frame .hb {
+      transform-origin: right center;
+      animation: hvRuleDraw 1.05s cubic-bezier(.16,1,.3,1) .26s both;
+    }
+    .hv-template-stage > .frame .body > *,
+    .hv-template-stage > .frame .tb,
+    .hv-template-stage > .frame .r,
+    .hv-template-stage > .frame .pg {
+      animation: hvTextIn .95s cubic-bezier(.16,1,.3,1) both;
+    }
+    .hv-template-stage > .frame .body > *:nth-child(1) { animation-delay: .34s; }
+    .hv-template-stage > .frame .body > *:nth-child(2) { animation-delay: .58s; }
+    .hv-template-stage > .frame .body > *:nth-child(3) { animation-delay: .84s; }
+    .hv-template-stage > .frame .r:nth-child(2) { animation-delay: .44s; }
+    .hv-template-stage > .frame .r:nth-child(3) { animation-delay: .64s; }
+    .hv-template-stage > .frame .r:nth-child(4) { animation-delay: .84s; }
+    .hv-template-stage > .frame .r:nth-child(5) { animation-delay: 1.04s; }
+    .hv-template-stage > .frame .pg { animation-delay: 1.12s; }
+    .hv-template-stage > .frame .qr i.on {
+      animation: hvQrPulse 3.8s steps(2,end) 2;
+    }
+    .hv-template-stage > .frame .qr i.on:nth-child(3n) { animation-delay: .44s; }
+    .hv-template-stage > .frame .qr i.on:nth-child(4n) { animation-delay: .92s; }
+    .hv-template-stage > .frame .st .c {
+      transform-origin: center bottom;
+      animation: hvCellGrow 1.1s cubic-bezier(.16,1,.3,1) both;
+    }
+    .hv-template-stage > .frame .st:nth-child(1) .c { animation-delay: .36s; }
+    .hv-template-stage > .frame .st:nth-child(2) .c { animation-delay: .50s; }
+    .hv-template-stage > .frame .st:nth-child(3) .c { animation-delay: .64s; }
+    .hv-template-stage > .frame .st:nth-child(4) .c { animation-delay: .78s; }
+    .hv-template-stage > .frame .st:nth-child(5) .c { animation-delay: .92s; }
+    .hv-template-stage > .frame .st:nth-child(6) .c { animation-delay: 1.06s; }
+    .hv-template-stage > .frame h1[data-hv-text="headline"],
+    .hv-template-stage > .frame h2[data-hv-text="headline"],
+    .hv-template-stage > .frame h3[data-hv-text="headline"],
+    .hv-template-stage > .frame .h[data-hv-text="headline"] {
+      font-size: clamp(42px, 6.6cqw, 96px);
+      line-height: 1.02;
+      max-width: 68cqw;
+      white-space: normal;
+    }
+    .hv-template-stage > .frame .ed[data-hv-text="context"],
+    .hv-template-stage > .frame .lede[data-hv-text="context"],
+    .hv-template-stage > .frame .dx[data-hv-text="context"],
+    .hv-template-stage > .frame p[data-hv-text="context"] {
+      font-size: clamp(18px, 1.9cqw, 30px);
+      line-height: 1.35;
+      max-width: 58cqw;
+    }
+    .hv-template-stage > .frame .tb .h[data-hv-text="headline"],
+    .hv-template-stage > .frame .topbar .h[data-hv-text="headline"] {
+      font-size: clamp(30px, 3.4cqw, 54px);
+      max-width: 62cqw;
+    }
+    .hv-template-stage > .frame .nm[data-hv-text^="item_title"] {
+      font-size: clamp(24px, 2.1cqw, 38px);
+      line-height: 1.08;
+    }
+    .hv-template-stage > .frame .dx[data-hv-text^="item_desc"],
+    .hv-template-stage > .frame .ds[data-hv-text^="item_desc"] {
+      font-size: clamp(15px, 1.15cqw, 21px);
+      line-height: 1.35;
+    }
+    @keyframes hvFrameIn {
+      from { opacity: 0; transform: translateY(14px) scale(.99); filter: blur(2px); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    @keyframes hvGlitchDrift {
+      from { transform: translateX(0) scaleX(1); opacity: .58; }
+      45% { transform: translateX(-1.8%) scaleX(1.025); opacity: .82; }
+      to { transform: translateX(.8%) scaleX(.99); opacity: .68; }
+    }
+    @keyframes hvRuleDraw {
+      from { transform: scaleX(0); opacity: .2; }
+      to { transform: scaleX(1); opacity: 1; }
+    }
+    @keyframes hvTextIn {
+      from { opacity: 0; transform: translateY(12px); filter: blur(1.5px); }
+      to { opacity: 1; transform: translateY(0); filter: blur(0); }
+    }
+    @keyframes hvQrPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .62; transform: scale(.92); }
+    }
+    @keyframes hvCellGrow {
+      from { transform: scaleY(.08); opacity: .18; }
+      to { transform: scaleY(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <main class="hv-template-stage">
+${frame}
+  </main>
+  <script>
+    const hv = ${JSON.stringify(data)};
+    const root = document.querySelector('.hv-template-stage > .frame') || document;
+    const setText = (selector, value, key) => {
+      const el = root.querySelector(selector);
+      if (!el || value == null || value === '') return false;
+      el.textContent = value;
+      if (key) el.setAttribute('data-hv-text', key);
+      return true;
+    };
+    const setAll = (selector, values, keyPrefix) => {
+      const nodes = Array.from(root.querySelectorAll(selector));
+      nodes.forEach((el, i) => {
+        const value = values[i];
+        if (value == null || value === '') return;
+        el.textContent = value;
+        el.setAttribute('data-hv-text', keyPrefix + '_' + (i + 1));
+      });
+    };
+    const headline = hv.headline || hv.context || hv.synopsis;
+    const context = hv.context || headline;
+    const profile = (() => {
+      if (root.querySelectorAll('.r .nm, .lrow .nm').length >= 2) return 'ledger';
+      if (root.querySelectorAll('.grid .c').length >= 2) return 'metrics';
+      if (root.querySelectorAll('.row .bl').length >= 2) return 'bars';
+      if (root.querySelector('.fig')) return 'stat';
+      if (root.querySelectorAll('.t .ti').length >= 2) return 'tiles';
+      if (root.querySelector('.q')) return 'quote';
+      return 'hero';
+    })();
+    setText('.kick, .ix, .cap, .label, .eyebrow, .ey', hv.type, 'type');
+    setText('.pg, .count', hv.frameNo, 'frame_no');
+    if (profile === 'ledger') {
+      setText('.tb .h, .topbar .h', headline, 'headline');
+      setText('.tb .t, .topbar .t', hv.frameNo, 'frame_no');
+      setAll('.r .nm, .lrow .nm', hv.itemTitles || hv.sentences, 'item_title');
+      setAll('.r .dx, .lrow .ds', hv.itemDescriptions || hv.sentences, 'item_desc');
+    } else if (profile === 'metrics') {
+      setText('h3, h2, h1', headline, 'headline');
+      setAll('.grid .c .n', hv.metricValues, 'metric_value');
+      setAll('.grid .c .nm', hv.itemTitles || hv.sentences, 'item_title');
+      setAll('.grid .c .d', hv.itemDescriptions || hv.sentences, 'item_desc');
+      setText('.tp', hv.frameNo, 'frame_no');
+    } else if (profile === 'bars') {
+      setText('h3, h2, h1', headline, 'headline');
+      setAll('.row .bl', hv.itemTitles || hv.sentences, 'item_title');
+      setAll('.row .pct', hv.metricValues, 'metric_value');
+      Array.from(root.querySelectorAll('.row .fill')).forEach((el, i) => {
+        const n = Number((hv.metricValues || [])[i]);
+        if (Number.isFinite(n)) el.style.width = Math.max(18, Math.min(96, n)) + '%';
+      });
+    } else if (profile === 'stat') {
+      setText('.tag', (hv.itemTitles || [])[0] || hv.type, 'item_title_1');
+      setText('.fig', (hv.metricValues || [])[0] || headline, 'metric_value_1');
+      setText('.d, .ed, .lede, .sub, .desc, p', context, 'context');
+      setText('.tb .l:first-child, .fl .l:first-child', hv.templateName, 'template');
+      setText('.tb .l:last-child, .fl .l:last-child', hv.frameNo, 'frame_no');
+    } else if (profile === 'tiles') {
+      setText('h3, h2, h1', headline, 'headline');
+      setAll('.t .ti', hv.itemTitles || hv.sentences, 'item_title');
+      setText('.tb .l:first-child', hv.type, 'type');
+      setText('.tb .l:last-child', hv.frameNo, 'frame_no');
+    } else if (profile === 'quote') {
+      setText('.q, blockquote, h3, h2, h1', context, 'context');
+      setText('.c, .at', hv.templateName, 'template');
+      setText('.ro', hv.frameNo, 'frame_no');
+    } else {
+      setText('h3, h2, h1, .tb .h, .topbar .h', headline, 'headline');
+      setText('.ed, .lede, .sub, .desc, p', context, 'context');
+      setText('.tb .t, .topbar .t, .meta, .tagline', hv.frameNo, 'frame_no');
+    }
+    const titleNodes = Array.from(root.querySelectorAll('h1,h2,h3,.h,.nm'));
+    if (!titleNodes.some((el) => el.getAttribute('data-hv-text') === 'headline') && titleNodes[0]) {
+      titleNodes[0].textContent = headline;
+      titleNodes[0].setAttribute('data-hv-text', 'headline');
+    }
+  </script>
+</body>
+</html>`;
+}
+
+function extractTemplateStyles(html: string): string {
+  const styles: string[] = [];
+  const re = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) && match[1]) styles.push(match[1]);
+  return styles.join('\n\n');
+}
+
+function extractTemplateFrameBlocks(html: string): string[] {
+  const out: string[] = [];
+  const re = /<div\b[^>]*class=(["'])[^"']*\bframe\b[^"']*\1[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    const block = extractBalancedDiv(html, match.index);
+    if (block) out.push(block);
+  }
+  return out;
+}
+
+function extractTemplateGenerationBlocks(html: string): string[] {
+  const frames = extractTemplateFrameBlocks(html);
+  if (frames.length > 0) return frames;
+  return Array.from(html.matchAll(/<template\b[^>]*>([\s\S]*?)<\/template>/gi))
+    .map((match) => match[1]?.trim() ?? '')
+    .filter(Boolean);
+}
+
+function extractBalancedDiv(html: string, start: number): string | undefined {
+  const tagRe = /<\/?div\b[^>]*>/gi;
+  tagRe.lastIndex = start;
+  let depth = 0;
+  let first = true;
+  let match: RegExpExecArray | null;
+  while ((match = tagRe.exec(html))) {
+    const tag = match[0];
+    if (first && match.index !== start) return undefined;
+    first = false;
+    if (tag.startsWith('</')) depth -= 1;
+    else depth += 1;
+    if (depth === 0) return html.slice(start, tagRe.lastIndex);
+  }
+  return undefined;
+}
+
+function headlineFromNarrationText(text: string): string {
+  const first = text
+    .split(/(?<=[，,、：:；;。！？!?])\s*/)
+    .map((s) => s.trim())
+    .find(Boolean) ?? text.trim();
+  return first.length > 22 ? `${first.slice(0, 20)}…` : first;
+}
+
+function splitFrameSentences(text: string, max: number): string[] {
+  const parts = text
+    .split(/(?<=[。！？!?；;。.])\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const source = parts.length > 0 ? parts : [text.trim()].filter(Boolean);
+  return source.slice(0, max).map((s) => (s.length > 54 ? `${s.slice(0, 52)}…` : s));
+}
+
+function selectedTemplateStructureBrief(templateHtml: string): string {
+  if (!isRenderableHtmlTemplate(templateHtml)) return '';
+  const frames = extractTemplateGenerationBlocks(templateHtml).slice(0, 8);
+  if (frames.length === 0) return '';
+  return frames.map((frame, i) => {
+    const profile = templateFrameProfileFromHtml(frame);
+    return `  ${i + 1}. ${profile.kind}: ${profile.guidance}`;
+  }).join('\n');
+}
+
+export function buildTemplateGenerationReference(args: {
+  templateName: string;
+  templateDescription?: string;
+  templateHtml: string;
+  index: number;
+  total: number;
+  text: string;
+  contentKind?: 'text' | 'data' | 'entity';
+}): string {
+  const frames = extractTemplateGenerationBlocks(args.templateHtml);
+  const selected = selectTemplateFrameBlock(frames, {
+    index: args.index,
+    total: args.total,
+    text: args.text,
+    contentKind: args.contentKind,
+  });
+  const rootTokens = /:root\s*\{([\s\S]*?)\}/i.exec(args.templateHtml)?.[1]?.trim();
+  const styles = extractTemplateStyles(args.templateHtml);
+  const styleContract = rootTokens
+    ? `:root { ${rootTokens.slice(0, 1500)} }`
+    : styles.slice(0, 1800);
+  const body = /<body\b[^>]*>([\s\S]*?)<\/body>/i.exec(args.templateHtml)?.[1] ?? '';
+  const structure = (selected || body || args.templateHtml)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 3200);
+  const profile = templateFrameProfileFromHtml(selected ?? structure);
+  return [
+    `SELECTED TEMPLATE CONTRACT (REQUIRED): ${args.templateName}${args.templateDescription ? ` — ${args.templateDescription}` : ''}`,
+    `Use this exact visual system and the selected "${profile.kind}" composition structure. Preserve its palette, typography, spacing, borders, shapes, density and motion vocabulary. Replace sample content with the user's content; do not replace the design with a generic theme.`,
+    styleContract ? `STYLE TOKENS / CORE CSS:\n\`\`\`css\n${styleContract}\n\`\`\`` : '',
+    structure ? `SEMANTICALLY MATCHED TEMPLATE FRAME:\n\`\`\`html\n${structure}\n\`\`\`` : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+function templateFrameProfileFromHtml(frameHtml: string): { kind: string; guidance: string } {
+  const count = (re: RegExp) => Array.from(frameHtml.matchAll(re)).length;
+  const ledgerRows = count(/class=(["'])[^"']*\b(?:r|lrow)\b[^"']*\1/gi);
+  const metricCards = count(/class=(["'])[^"']*\bc\b[^"']*\1/gi);
+  const barRows = count(/class=(["'])[^"']*\brow\b[^"']*\1/gi);
+  const tiles = count(/class=(["'])[^"']*\bt\b[^"']*\1/gi);
+  if (/class=(["'])[^"']*\b(?:steps?|timeline|process)\b[^"']*\1/i.test(frameHtml)) return { kind: 'process/timeline frame', guidance: 'needs 3-5 ordered phases with short action labels and outcomes' };
+  if (/before\s*\/\s*during\s*\/\s*after|\bbefore\b[\s\S]{0,300}\bafter\b|\bcomparison\b|\bversus\b|\bvs\.?\b/i.test(frameHtml)) return { kind: 'comparison frame', guidance: 'needs two comparable states, values, or approaches using the same unit and framing' };
+  if (/flowchart|decision|branching|node[- ]graph|system[- ]diagram|service[- ]map/i.test(frameHtml)) return { kind: 'flow/diagram frame', guidance: 'needs named nodes and explicit relationships or directional steps' };
+  if (/<code\b|<pre\b|terminal|editor-pane|workbench/i.test(frameHtml)) return { kind: 'code/terminal frame', guidance: 'needs a compact code, command, or developer-workflow example' };
+  if (ledgerRows >= 2) return { kind: 'ledger/list frame', guidance: 'needs 3-4 short item titles plus short descriptions; avoid long paragraphs' };
+  if (/class=(["'])[^"']*\b(?:bars?|chart|track|fill|st|pstack)\b[^"']*\1/i.test(frameHtml) || barRows >= 2) return { kind: 'bar/ranking frame', guidance: 'needs ranked labels and numeric values that can map to bar lengths or heights' };
+  if (metricCards >= 2 || /dashboard|metrics?|\bkpi\b/i.test(frameHtml)) return { kind: 'metric-card frame', guidance: 'needs 2-4 metric values, labels, and one-line explanations' };
+  if (/class=(["'])[^"']*\bfig\b[^"']*\1/i.test(frameHtml)) return { kind: 'big-stat frame', guidance: 'needs one large number or short punchline plus a supporting sentence' };
+  if (tiles >= 2) return { kind: 'topic-tile frame', guidance: 'needs 2-4 compact topic labels' };
+  if (/class=(["'])[^"']*\bq\b[^"']*\1|blockquote/i.test(frameHtml)) return { kind: 'quote frame', guidance: 'needs one memorable sentence, not a list' };
+  return { kind: 'hero/title frame', guidance: 'needs one strong headline and one short supporting line' };
+}
+
+function selectTemplateFrameBlock(frameBlocks: string[], args: Pick<LocalTemplateFrameArgs, 'index' | 'total' | 'text' | 'contentKind'>): string | undefined {
+  if (frameBlocks.length === 0) return undefined;
+  const fallbackIndex = args.index % frameBlocks.length;
+  const text = args.text.toLowerCase();
+  const numericValues = Array.from(text.matchAll(/(?<![\p{L}\p{N}])\d+(?:\.\d+)?%?/gu));
+  const wantsData = args.contentKind === 'data' || numericValues.length >= 2;
+  const wantsProcess = /步骤|流程|阶段|先.+再|首先|其次|最后|step|process|phase|timeline|workflow/i.test(text);
+  const wantsComparison = /对比|比较|相比|从.+到|原来.+现在|之前.+之后|提升|下降|增长|减少|before|after|versus|\bvs\.?\b/i.test(text);
+  const wantsQuote = /金句|观点|认为|表示|quote|“|”|「|」/.test(text);
+  const wantsCode = /代码|命令|终端|编辑器|开发者|code|terminal|command|developer|vscode/i.test(text);
+  const wantsDiagram = /关系|系统|网络|节点|决策|分支|调度|链路|flow|system|network|decision|dispatch/i.test(text);
+
+  let bestIndex = fallbackIndex;
+  let bestScore = 0;
+  frameBlocks.forEach((frame, i) => {
+    const kind = templateFrameProfileFromHtml(frame).kind;
+    let score = 0;
+    if (wantsData && /metric|bar|stat|ledger/.test(kind)) score += 50;
+    if (wantsComparison && /comparison|bar|metric/.test(kind)) score += 36;
+    if (wantsProcess && /process|timeline|ledger|list/.test(kind)) score += 42;
+    if (wantsDiagram && /flow|diagram|process/.test(kind)) score += 42;
+    if (wantsCode && /code|terminal/.test(kind)) score += 48;
+    if (wantsQuote && /quote/.test(kind)) score += 36;
+    if (args.index === 0 && /hero|title/.test(kind)) score += 18;
+    if (args.index === args.total - 1 && /quote|hero|title/.test(kind)) score += 12;
+    // Prefer different equally suitable compositions as the storyboard moves.
+    score -= Math.abs(i - fallbackIndex) * 0.1;
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  });
+  return frameBlocks[bestIndex] ?? frameBlocks[0];
+}
+
+function templateTextFromGraphNode(node: unknown, fallback: string): string {
+  const n = node as {
+    text?: unknown;
+    label?: unknown;
+    data?: { title?: unknown; unit?: unknown; items?: Array<{ label?: unknown; value?: unknown }> };
+  };
+  const parts: string[] = [];
+  const text = String(n.text ?? n.label ?? '').trim();
+  if (text) parts.push(text);
+  const title = String(n.data?.title ?? '').trim();
+  if (title && title !== text) parts.push(title);
+  const unit = String(n.data?.unit ?? '').trim();
+  if (Array.isArray(n.data?.items)) {
+    for (const item of n.data.items) {
+      const label = String(item.label ?? '').trim();
+      const value = item.value == null ? '' : String(item.value).trim();
+      const pair = [label, value ? `${value}${unit}` : ''].filter(Boolean).join(' ');
+      if (pair) parts.push(pair);
+    }
+  }
+  return parts.length > 0 ? parts.join('。') : fallback;
+}
+
+export function buildLocalTemplateAdaptedGraph(args: {
+  frameCount: number;
+  perFrameDurationSec: number;
+  contentTurns: string[];
+  openingTopic?: string;
+  sourceTexts: string[];
+  frameTexts?: string[];
+  templateHtml: string;
+  fallbackSynopsis: string;
+}): import('@html-video/content-graph').ContentGraph {
+  const exactFrameTexts = (args.frameTexts ?? []).map((text) => text.trim()).filter(Boolean);
+  const source = exactFrameTexts.length === args.frameCount
+    ? exactFrameTexts.join(' ')
+    : [
+        ...(args.contentTurns ?? []),
+        ...(args.sourceTexts ?? []),
+        args.openingTopic ?? '',
+      ].join('\n').replace(/\s+/g, ' ').trim();
+  const segments = exactFrameTexts.length === args.frameCount
+    ? exactFrameTexts
+    : splitStoryboardSourceIntoFrames(source || args.fallbackSynopsis, args.frameCount);
+  const frameBlocks = isRenderableHtmlTemplate(args.templateHtml)
+    ? extractTemplateFrameBlocks(args.templateHtml)
+    : [];
+  const nodes = Array.from({ length: args.frameCount }, (_, i) => {
+    const text = segments[i] || segments[segments.length - 1] || args.fallbackSynopsis;
+    const realNumbers = Array.from(text.matchAll(/(?<![\p{L}\p{N}])\d+(?:\.\d+)?%?/gu))
+      .map((match) => Number.parseFloat(match[0]))
+      .filter(Number.isFinite);
+    const selectedFrame = selectTemplateFrameBlock(frameBlocks, {
+      index: i,
+      total: args.frameCount,
+      text,
+      contentKind: realNumbers.length >= 2 ? 'data' : 'text',
+    });
+    const profile = templateFrameProfileFromHtml(selectedFrame ?? '');
+    const id = `frame_${i + 1}`;
+    const label = headlineFromNarrationText(text);
+    const base = {
+      id,
+      label,
+      frameIntent: profile.kind,
+      durationSec: args.perFrameDurationSec,
+    };
+    if (/metric|bar|stat|ledger|list|tile/i.test(profile.kind)) {
+      // Never invent chart values merely because the selected template contains
+      // a metric composition. Without at least two real figures, keep the node
+      // as grounded text and let the renderer adapt the template structure.
+      if (realNumbers.length < 2) {
+        return {
+          ...base,
+          kind: 'text' as const,
+          text,
+        };
+      }
+      const titles = templateFrameItemTitles(text, i);
+      return {
+        ...base,
+        kind: 'data' as const,
+        text: label,
+        data: {
+          title: label,
+          items: titles.map((title, idx) => ({
+            label: title,
+            value: realNumbers[idx % realNumbers.length]!,
+            note: templateFrameItemDescriptions(text, titles, i)[idx],
+          })),
+        },
+      };
+    }
+    if (/quote|hero|title/i.test(profile.kind) && i === args.frameCount - 1) {
+      return {
+        ...base,
+        kind: 'entity' as const,
+        props: { headline: label, text },
+      };
+    }
+    return {
+      ...base,
+      kind: 'text' as const,
+      text,
+    };
+  });
+  return {
+    schemaVersion: 1,
+    intent: 'explainer',
+    synopsis: shortFrameContext(source || args.fallbackSynopsis) || args.fallbackSynopsis,
+    nodes,
+    edges: nodes.slice(1).map((node, i) => ({
+      from: nodes[i]!.id,
+      to: node.id,
+      kind: 'sequence' as const,
+      reason: 'local template-adapted fallback',
+    })),
+  };
+}
+
+function splitStoryboardSourceIntoFrames(text: string, frameCount: number): string[] {
+  const sentences = text
+    .split(/(?<=[。！？!?；;])\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const source = sentences.length > 0 ? sentences : splitDisplayClauses(text);
+  if (source.length === 0) return Array.from({ length: frameCount }, () => text.trim()).filter(Boolean);
+  if (source.length <= frameCount) {
+    const out = [...source];
+    while (out.length < frameCount) out.push(source[source.length - 1] ?? text);
+    return out.slice(0, frameCount);
+  }
+  const per = Math.ceil(source.length / frameCount);
+  const out: string[] = [];
+  for (let i = 0; i < source.length && out.length < frameCount; i += per) {
+    out.push(source.slice(i, i + per).join(' '));
+  }
+  return out;
+}
+
+function shortFrameContext(text: string): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  const firstSentence = compact.split(/(?<=[。！？!?；;])\s*/).find(Boolean) ?? compact;
+  return truncateZh(firstSentence, 44);
+}
+
+function templateFrameItemTitles(text: string, frameIndex: number): string[] {
+  const clauses = splitDisplayClauses(text)
+    .map((s) => titlePhraseForTemplateItem(s))
+    .filter(Boolean);
+  const fallback = genericFallbackTitles(frameIndex);
+  return fillTemplateItems(clauses, fallback, 4, 18);
+}
+
+function templateFrameItemDescriptions(text: string, titles: string[], frameIndex: number): string[] {
+  const clauses = splitDisplayClauses(text);
+  const fallback = genericFallbackDescriptions(frameIndex);
+  const descs = titles.map((title, i) => descriptionPhraseForTemplateItem(clauses[i + 1] || clauses[i] || title));
+  return fillTemplateItems(descs, fallback, 4, 22);
+}
+
+function templateFrameMetricValues(text: string, frameIndex: number): string[] {
+  const found = Array.from(text.matchAll(/[+-]?\d+(?:\.\d+)?\s*(?:%|倍|分钟|小时|天|元|万|亿|年|次)?/g))
+    .map((m) => m[0].replace(/\s+/g, ''))
+    .filter(Boolean);
+  const fallback = [
+    ['01', '02', '03', '04'],
+    ['24', '68', '92', '100'],
+    ['88', '64', '42', '27'],
+    ['3x', '5x', '8x', '10x'],
+  ][frameIndex % 4]!;
+  return fillTemplateItems(found, fallback, 4, 8);
+}
+
+function splitDisplayClauses(text: string): string[] {
+  return text
+    .replace(/\s+/g, ' ')
+    .split(/(?<=[。！？!?；;，,、：:])\s*/)
+    .map((s) => s.replace(/[。！？!?；;，,、：:]+$/g, '').trim())
+    .filter((s) => s.length >= 2);
+}
+
+function titlePhraseForTemplateItem(text: string): string {
+  const compact = text.replace(/^(比如|例如|如果|但是|而且|然后|所以|真正|最近|原来|现在)\s*/u, '').trim();
+  const beforeVerb = compact.split(/(，|,|会|能|把|让|是|不是|已经|开始|直接|自动|不用|可以)/u)[0]?.trim();
+  const candidate = beforeVerb && beforeVerb.length >= 3 ? beforeVerb : compact;
+  return truncateZh(candidate, 18);
+}
+
+function descriptionPhraseForTemplateItem(text: string): string {
+  return truncateZh(text, 22);
+}
+
+function genericFallbackTitles(frameIndex: number): string[] {
+  const groups = [
+    ['核心观点', '关键变化', '主要价值', '下一步'],
+    ['问题', '转折', '方法', '结果'],
+    ['输入', '处理', '判断', '输出'],
+    ['过去', '现在', '效率', '收益'],
+    ['场景', '能力', '证据', '结论'],
+    ['提醒', '行动', '人群', '金句'],
+  ];
+  return groups[frameIndex % groups.length] ?? groups[0]!;
+}
+
+function genericFallbackDescriptions(frameIndex: number): string[] {
+  const groups = [
+    ['当前帧的重点', '信息发生变化', '带来具体好处', '引向后续动作'],
+    ['先指出痛点', '再给出反差', '说明解决路径', '落到可见结果'],
+    ['素材或数据进入', '系统完成整理', '形成判断依据', '输出可用内容'],
+    ['原本耗时费力', '现在流程缩短', '减少重复劳动', '留下判断空间'],
+    ['对应真实场景', '展示核心能力', '给出可信依据', '收束为结论'],
+    ['不遗漏关键点', '提示下一步', '点名适用对象', '留下记忆句'],
+  ];
+  return groups[frameIndex % groups.length] ?? groups[0]!;
+}
+
+function fillTemplateItems(source: string[], fallback: string[], count: number, maxLen: number): string[] {
+  const out: string[] = [];
+  for (const item of source) {
+    const cleaned = item.trim();
+    if (cleaned && !out.includes(cleaned)) out.push(truncateZh(cleaned, maxLen));
+    if (out.length >= count) break;
+  }
+  for (const item of fallback) {
+    const cleaned = item.trim();
+    if (cleaned && !out.includes(cleaned)) out.push(truncateZh(cleaned, maxLen));
+    if (out.length >= count) break;
+  }
+  return out.slice(0, count);
+}
+
+function truncateZh(text: string, max: number): string {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  return compact.length > max ? `${compact.slice(0, Math.max(1, max - 1))}…` : compact;
+}
+
+function withTemplateBaseHref(html: string, templateDir?: string): string {
+  if (!templateDir) return html;
+  const href = templateDirectoryFileUrl(templateDir);
+  const baseTag = `<base href="${escapeHtmlAttr(href)}">`;
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/<head\b[^>]*>/i, (head) => `${head}\n  ${baseTag}`);
+  }
+  return `${baseTag}\n${html}`;
+}
+
+function templateDirectoryFileUrl(templateDir: string): string {
+  const href = pathToFileURL(resolve(templateDir)).href;
+  return href.endsWith('/') ? href : `${href}/`;
+}
+
+function isRenderableHtmlTemplate(source: string): boolean {
+  return /<!doctype\s+html|<html\b|<body\b/i.test(source);
+}
+
+export async function loadTemplateGenerationSource(tmpl: TemplateMetadata): Promise<string> {
+  if (!tmpl.__dir || !tmpl.source_entry) return '';
+  const entryPath = join(tmpl.__dir, tmpl.source_entry);
+  if (!existsSync(entryPath)) return '';
+  const entry = await readFile(entryPath, 'utf8');
+  const chunks = [entry];
+
+  if (tmpl.native) {
+    const sourceDir = dirname(entryPath);
+    const files = (await readdir(sourceDir)).filter((file) => /\.(?:tsx?|jsx?|css)$/i.test(file)).sort();
+    for (const file of files) {
+      if (join(sourceDir, file) === entryPath) continue;
+      chunks.push(`\n<!-- ${file} -->\n${await readFile(join(sourceDir, file), 'utf8')}`);
+    }
+  } else if (extname(entryPath).toLowerCase() === '.html') {
+    const refs = [...new Set(Array.from(entry.matchAll(/data-composition-src=["']([^"']+)["']/gi))
+      .map((match) => match[1] ?? '')
+      .filter(Boolean))];
+    for (const ref of refs) {
+      const file = resolve(dirname(entryPath), ref);
+      if (isPathInside(tmpl.__dir, file) && existsSync(file)) {
+        chunks.push(`\n<!-- composition: ${ref} -->\n${await readFile(file, 'utf8')}`);
+      }
+    }
+  }
+  return chunks.join('\n');
+}
+
+function templatePosterFileUrl(tmpl?: { __dir?: string; preview?: { poster?: string } } | null): string {
+  if (!tmpl?.__dir || !tmpl.preview?.poster) return '';
+  const posterPath = join(tmpl.__dir, tmpl.preview.poster);
+  return existsSync(posterPath) ? pathToFileURL(posterPath).href : '';
+}
+
+function localWechatAiDispatchTranscriptFrameHtml(args: LocalTemplateFrameArgs): string {
+  const safeText = escapeHtml(args.text);
+  const safeSynopsis = escapeHtml(args.synopsis);
+  const safeType = escapeHtml(args.type ?? '口播字幕');
+  const section = args.index === 0
+    ? '01 / OPENING'
+    : args.index === args.total - 1
+      ? '99 / TAKEAWAY'
+      : `${String(args.index + 1).padStart(2, '0')} / AI DISPATCH`;
+  const phase = args.index === 0
+    ? 'INTENT'
+    : args.index === args.total - 1
+      ? 'OUTPUT'
+      : 'CONTEXT';
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WeChat AI Dispatch transcript frame</title>
+  <style>
+    :root {
+      --paper: #f5f7f1;
+      --ink: #202521;
+      --muted: #7c837d;
+      --line: rgba(32,37,33,.16);
+      --green: #159c63;
+      --green-soft: rgba(21,156,99,.12);
+      --blue: #315f9f;
+      --blue-soft: rgba(49,95,159,.14);
+      --sans: "Inter", "SF Pro Display", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      --mono: "SF Mono", "Roboto Mono", "Cascadia Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: var(--paper); }
+    body {
+      color: var(--ink);
+      font-family: var(--sans);
+      background:
+        linear-gradient(90deg, rgba(32,37,33,.055) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(32,37,33,.055) 1px, transparent 1px),
+        radial-gradient(circle at 68% 46%, rgba(49,95,159,.08), transparent 22%),
+        var(--paper);
+      background-size: 72px 72px, 72px 72px, auto, auto;
+    }
+    .stage { position: absolute; inset: 58px 94px 76px; }
+    .rule { position: absolute; left: 0; right: 0; height: 3px; background: var(--ink); transform-origin: left; animation: rule .8s cubic-bezier(.16,1,.3,1) forwards; }
+    .top { top: 0; }
+    .bottom { bottom: 72px; animation-delay: .2s; }
+    .header { position: absolute; top: 36px; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; opacity: 0; transform: translateY(14px); animation: in .55s ease-out .35s forwards; }
+    .brand { font-size: 34px; font-weight: 760; }
+    .system { color: var(--muted); font: 19px var(--mono); letter-spacing: .12em; }
+    .panel { position: absolute; left: 0; right: 0; top: 132px; bottom: 148px; border: 2px solid rgba(32,37,33,.15); background: rgba(247,249,245,.42); opacity: 0; transform: translateY(18px); animation: in .65s ease-out .55s forwards; }
+    .panel::before { content: ""; position: absolute; top: 0; bottom: 0; left: 610px; width: 2px; background: rgba(32,37,33,.12); transform-origin: top; transform: scaleY(0); animation: lineY .75s ease-out .8s forwards; }
+    .copy { position: absolute; left: 32px; top: 54px; width: 520px; }
+    .mark { display: flex; align-items: center; gap: 14px; color: var(--green); font: 800 20px var(--mono); letter-spacing: .08em; opacity: 0; transform: translateY(16px); animation: in .52s ease-out .85s forwards; }
+    .mark::before { content: ""; width: 34px; height: 4px; background: currentColor; }
+    h1 { margin: 32px 0 0; font-size: 64px; line-height: 1.08; font-weight: 820; letter-spacing: 0; text-wrap: balance; opacity: 0; transform: translateY(28px); animation: in .7s cubic-bezier(.16,1,.3,1) 1s forwards; }
+    .lede { margin-top: 24px; color: #4f5751; font-size: 23px; line-height: 1.44; opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.18s forwards; }
+    .pill { margin-top: 30px; width: 430px; min-height: 78px; display: flex; align-items: center; padding: 0 30px; border: 3px solid var(--ink); border-radius: 16px; background: rgba(255,255,255,.5); font-size: 25px; font-weight: 760; opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.35s forwards; }
+    .network { position: absolute; left: 690px; right: 58px; top: 74px; bottom: 64px; }
+    .map-title { position: absolute; left: 0; top: 0; color: var(--muted); font: 800 18px var(--mono); letter-spacing: .1em; }
+    .hub { position: absolute; left: 46%; top: 48%; width: 214px; height: 214px; border-radius: 50%; border: 5px solid var(--blue); background: #edf6ff; display: grid; place-items: center; color: var(--blue); box-shadow: 0 0 0 18px var(--blue-soft); transform: translate(-50%,-50%) scale(.86); opacity: 0; animation: hub .75s cubic-bezier(.16,1,.3,1) 1s forwards, pulse 2.6s ease-in-out 2s 2; }
+    .hub small { display: block; text-align: center; font-size: 22px; margin-bottom: 8px; }
+    .hub b { display: block; font-size: 60px; line-height: 1; }
+    .node { position: absolute; width: 205px; height: 118px; padding: 22px 26px; border: 3px solid rgba(32,37,33,.22); background: rgba(255,255,255,.5); opacity: 0; transform: translateY(18px); animation: in .52s ease-out forwards; }
+    .node .label { display: block; color: var(--muted); font: 17px var(--mono); letter-spacing: .09em; margin-bottom: 10px; }
+    .node .name { font-size: 36px; font-weight: 820; }
+    .n1 { left: 74px; top: 54px; animation-delay: 1.18s; }
+    .n2 { right: 74px; top: 46px; animation-delay: 1.26s; }
+    .match { right: 26px; top: 288px; border-color: var(--green); background: var(--green-soft); animation-delay: 1.42s; }
+    .connector { position: absolute; height: 3px; background: var(--line); transform-origin: left; transform: scaleX(0) rotate(var(--rot)); animation: connect .72s cubic-bezier(.16,1,.3,1) forwards; }
+    .c1 { left: 276px; top: 186px; width: 270px; --rot: 34deg; animation-delay: 1.22s; }
+    .c2 { left: 590px; top: 186px; width: 294px; --rot: -35deg; animation-delay: 1.3s; }
+    .c3 { left: 602px; top: 342px; width: 316px; height: 5px; background: var(--green); --rot: 3deg; animation-delay: 1.55s; }
+    .metrics { position: absolute; left: 0; right: 338px; bottom: 0; height: 76px; display: grid; grid-template-columns: repeat(3,1fr); border-top: 2px solid rgba(32,37,33,.16); border-bottom: 2px solid rgba(32,37,33,.16); opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.65s forwards; }
+    .metric { display: flex; align-items: center; gap: 14px; padding: 0 22px; border-right: 2px solid rgba(32,37,33,.12); }
+    .metric:last-child { border-right: 0; }
+    .metric b { color: var(--green); font: 800 28px var(--mono); }
+    .metric span { color: var(--muted); font-size: 16px; font-weight: 720; }
+    .caption { position: absolute; left: 0; right: 0; bottom: 0; height: 72px; display: flex; align-items: flex-end; justify-content: center; gap: 32px; font-size: 50px; font-weight: 820; color: var(--muted); opacity: 0; animation: in .6s ease-out 1.75s forwards; }
+    .caption .accent { color: var(--green); }
+    @keyframes in { to { opacity: 1; transform: translateY(0); } }
+    @keyframes rule { to { transform: scaleX(1); } }
+    @keyframes lineY { to { transform: scaleY(1); } }
+    @keyframes hub { to { opacity: 1; transform: translate(-50%,-50%) scale(1); } }
+    @keyframes pulse { 50% { box-shadow: 0 0 0 28px rgba(49,95,159,.05); } }
+    @keyframes connect { to { transform: scaleX(1) rotate(var(--rot)); } }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <div class="rule top"></div>
+    <div class="rule bottom"></div>
+    <header class="header">
+      <div class="brand">AI 观点 / 口播分镜</div>
+      <div class="system">DISTRIBUTION SYSTEM · FRAME ${String(args.index + 1).padStart(2, '0')}</div>
+    </header>
+    <section class="panel">
+      <div class="copy">
+        <div class="mark">${section}</div>
+        <h1 data-hv-text="headline">${safeText}</h1>
+        <div class="lede" data-hv-text="context">${safeSynopsis}</div>
+        <div class="pill">“${phase} / ${safeType}”</div>
+      </div>
+      <div class="network">
+        <div class="map-title">VOICE ROUTER / MATCH SCORE</div>
+        <span class="connector c1"></span>
+        <span class="connector c2"></span>
+        <span class="connector c3"></span>
+        <div class="hub"><div><small>观点</small><b>AI</b></div></div>
+        <div class="node n1"><span class="label">FRAME</span><span class="name">${String(args.index + 1).padStart(2, '0')}</span></div>
+        <div class="node n2"><span class="label">MODE</span><span class="name">口播</span></div>
+        <div class="node match"><span class="label">MATCHED</span><span class="name">字幕</span></div>
+        <div class="metrics">
+          <div class="metric"><b>${String(args.index + 1).padStart(2, '0')}</b><span>Current frame</span></div>
+          <div class="metric"><b>${String(args.total).padStart(2, '0')}</b><span>Total frames</span></div>
+          <div class="metric"><b>AI</b><span>Template route</span></div>
+        </div>
+      </div>
+    </section>
+    <footer class="caption"><span>口播文案</span><span>→</span><span>AI <span class="accent">调度帧</span></span></footer>
+  </main>
+</body>
+</html>`;
+}
+
 function localFramePalette(style: string): {
   bgA: string;
   bgB: string;
@@ -5121,10 +6717,8 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function extractHtmlFromAgentText(text: string): string | undefined {
-  return /```html\s*\n([\s\S]*?)```/i.exec(text)?.[1]?.trim()
-    ?? /<!doctype html[\s\S]*?<\/html>/i.exec(text)?.[0]
-    ?? /<html[\s\S]*?<\/html>/i.exec(text)?.[0];
+function escapeHtmlAttr(value: string): string {
+  return escapeHtml(value).replace(/'/g, '&#39;');
 }
 
 async function writeNarrateFrameDebug(
@@ -5164,28 +6758,104 @@ function wantsLocalTranscriptFallback(text: string): boolean {
 }
 
 /** Spawn the agent, collect all stdout text, return when done. */
+async function awaitAgentDone(
+  handle: ReturnType<typeof spawnAgent>,
+  timeoutMs = 120_000,
+): Promise<{ exitCode: number; signal: NodeJS.Signals | null }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      handle.done,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          handle.stop();
+          reject(new Error(`Agent timed out after ${Math.round(timeoutMs / 1000)}s`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+const AGENT_COMPATIBILITY_MODEL_CACHE = new Map<string, string>();
+
 async function callAgentSimple(
   def: import('@html-video/runtime').AgentDef,
   prompt: string,
   cwd: string,
   model?: string,
+  timeoutMs = 120_000,
 ): Promise<string> {
-  let buf = '';
-  let agentError = '';
-  const handle = spawnAgent({
-    def,
-    prompt,
-    context: { cwd, ...(model && { model }) },
-    onEvent: (ev) => {
-      if (ev.type === 'text') buf += ev.chunk;
-      else if (ev.type === 'error') agentError += `${agentError ? '\n' : ''}${ev.message}`;
-    },
-  });
-  const result = await handle.done;
-  if (result.exitCode !== 0 && !buf.trim()) {
-    throw new Error(
-      `agent "${def.id}" exited with code ${result.exitCode}${agentError ? `: ${agentError.slice(0, 500)}` : ''}`,
+  const compatibilityKey = `${def.id}\u0000${model ?? '(config default)'}`;
+  const effectiveModel = AGENT_COMPATIBILITY_MODEL_CACHE.get(compatibilityKey) ?? model;
+  const invoke = async (selectedModel?: string): Promise<string> => {
+    let buf = '';
+    let agentError = '';
+    const handle = spawnAgent({
+      def,
+      prompt,
+      context: { cwd, ...(selectedModel && { model: selectedModel }) },
+      onEvent: (ev) => {
+        if (ev.type === 'text') buf += ev.chunk;
+        else if (ev.type === 'error') agentError = ev.message;
+      },
+    });
+    const exit = await awaitAgentDone(handle, timeoutMs);
+    if (exit.exitCode !== 0) {
+      throw new Error(agentError || `${def.name} exited with code ${exit.exitCode}`);
+    }
+    if (!buf.trim()) {
+      throw new Error(`${def.name} exited successfully but returned no output`);
+    }
+    return buf;
+  };
+
+  try {
+    return await invoke(effectiveModel);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const fallbackModel = compatibleAgentModelForError(def.id, effectiveModel, message);
+    if (!fallbackModel) throw error;
+    AGENT_COMPATIBILITY_MODEL_CACHE.set(compatibilityKey, fallbackModel);
+    process.stderr.write(
+      `[studio:agent] ${def.id} model ${effectiveModel || '(config default)'} is incompatible with this CLI; retrying with ${fallbackModel}\n`,
     );
+    return invoke(fallbackModel);
   }
-  return buf;
+}
+
+export function compatibleAgentModelForError(
+  agentId: string,
+  requestedModel: string | undefined,
+  errorMessage: string,
+): string | undefined {
+  const fallback = 'gpt-5.4';
+  if (
+    agentId === 'codex'
+    && requestedModel !== fallback
+    && /requires a newer version of Codex/i.test(errorMessage)
+  ) {
+    return fallback;
+  }
+  return undefined;
+}
+
+export function summarizeAgentFailure(errorMessage: string): string {
+  const messages = Array.from(errorMessage.matchAll(/"message"\s*:\s*"((?:\\.|[^"\\])*)"/g));
+  const encoded = messages[messages.length - 1]?.[1];
+  if (encoded) {
+    try {
+      const decoded = JSON.parse(`"${encoded}"`) as string;
+      if (decoded.trim()) return decoded.trim().slice(0, 240);
+    } catch {
+      // Fall through to a plain-text summary.
+    }
+  }
+  const meaningful = errorMessage
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !/^\d{4}-\d{2}-\d{2}T.*\bWARN\b/.test(line));
+  return (meaningful[meaningful.length - 1] || errorMessage || 'unknown agent error').slice(0, 240);
+
 }

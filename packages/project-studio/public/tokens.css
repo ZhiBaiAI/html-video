@@ -51,7 +51,8 @@
   --shadow-lg: 0 18px 48px rgba(20, 18, 11, 0.14);
 
   /* Typography — Inter (≈ TT Norms Pro) + JetBrains Mono (≈ TT Norms Pro Mono) */
-  --font-sans: 'Inter', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    -apple-system, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
   --font-serif: 'Source Serif 4', Georgia, serif;
 }

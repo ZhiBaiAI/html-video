@@ -1,0 +1,201 @@
+spec_version: 1
+id: frame-wechat-ai-dispatch
+name: WeChat AI Dispatch
+name_zh: 微信 AI 调度
+description: >
+  A warm-white technical distribution-system frame inspired by WeChat ecosystem
+  presentation screenshots: paper grid, mono labels, black hairlines, WeChat-green
+  dispatch highlight, lede, insight rows, blue AI hub, service nodes, route legend,
+  metric strip, source note, and export-safe CSS motion.
+description_zh: >
+  微信生态演示图风格的暖白技术分发模板：纸面网格、mono 标签、黑色细线、微信绿调度高亮、说明正文、关键点、蓝色 AI 中心节点、服务卡片、状态图例、指标条和可导出 CSS 动效。
+engine: hyperframes
+engine_version: ^0.4.0
+source_entry: source/index.html
+
+category: presentation
+subcategory: system-diagram
+tags: [wechat, ai, dispatch, distribution, system, diagram, grid, chinese, service-map, technical]
+
+best_for:
+  - "微信生态 / 小程序 / AI 分发机制说明"
+  - "AI agent 调度多个服务的技术叙事"
+  - "从搜索分发到智能匹配的产品架构页"
+  - "产品策略页、机制拆解页、架构说明页"
+
+output:
+  formats: [mp4, webm]
+  default_format: mp4
+  resolution:
+    default: { width: 1920, height: 1080 }
+    supported_aspects: ["16:9"]
+  fps:
+    default: 60
+    supported: [30, 60]
+  duration:
+    type: variable
+    min_sec: 4
+    max_sec: 8
+    default_sec: 6
+  alpha: false
+  audio:
+    supported: true
+    expected_inputs: [bgm, narration]
+
+inputs:
+  schema:
+    type: object
+    required: [title, headline, lede, hub, matched_service]
+    properties:
+      title:
+        type: "string"
+        maxLength: 40
+        description: "Top-left title, usually the ecosystem or topic name"
+      system_label:
+        type: "string"
+        maxLength: 36
+        description: "Top-right mono label, e.g. DISTRIBUTION SYSTEM · 2026"
+      section:
+        type: "string"
+        maxLength: 28
+        description: "Small section marker, e.g. 02 / AI DISPATCH"
+      headline:
+        type: "array"
+        minItems: 1
+        maxItems: 2
+        items: { type: "string" }
+        description: "One or two headline lines; the second line renders green"
+      lede:
+        type: "string"
+        maxLength: 96
+        description: "One compact explanatory sentence under the headline"
+      prompt:
+        type: "string"
+        maxLength: 28
+        description: "User intent pill, e.g. 帮我完成一件事"
+      insights:
+        type: "array"
+        minItems: 3
+        maxItems: 3
+        items:
+          type: object
+          required: [label, text]
+          properties:
+            label: { type: "string", maxLength: 10 }
+            text: { type: "string", maxLength: 24 }
+        description: "Three compact left-column support rows"
+      map_title:
+        type: "string"
+        maxLength: 32
+        description: "Small mono title above the network diagram"
+      legend:
+        type: "array"
+        minItems: 3
+        maxItems: 3
+        items:
+          type: object
+          required: [label, tone]
+          properties:
+            label: { type: "string", maxLength: 10 }
+            tone: { type: "string", enum: ["idle", "matched", "hub"] }
+        description: "Route-state legend labels"
+      hub:
+        type: "object"
+        required: [label, text]
+        properties:
+          label: { type: "string", maxLength: 8 }
+          text: { type: "string", maxLength: 4 }
+      services:
+        type: "array"
+        minItems: 4
+        maxItems: 4
+        items:
+          type: object
+          required: [label, name]
+          properties:
+            label: { type: "string", maxLength: 14 }
+            name: { type: "string", maxLength: 6 }
+        description: "Four secondary service nodes around the AI hub"
+      matched_service:
+        type: "object"
+        required: [label, name, badge]
+        properties:
+          label: { type: "string", maxLength: 14 }
+          name: { type: "string", maxLength: 6 }
+          badge: { type: "string", maxLength: 16 }
+      bottom_line:
+        type: "object"
+        properties:
+          before: { type: "string", maxLength: 8 }
+          after_prefix: { type: "string", maxLength: 8 }
+          after_accent: { type: "string", maxLength: 8 }
+      metrics:
+        type: "array"
+        minItems: 3
+        maxItems: 3
+        items:
+          type: object
+          required: [value, label]
+          properties:
+            value: { type: "string", maxLength: 6 }
+            label: { type: "string", maxLength: 20 }
+        description: "Three bottom metrics inside the diagram area"
+      footer_note:
+        type: "object"
+        properties:
+          source: { type: "string", maxLength: 32 }
+          page: { type: "string", maxLength: 16 }
+          status: { type: "string", maxLength: 24 }
+      duration_sec:
+        type: "number"
+        minimum: 4
+        maximum: 8
+        default: 6
+  examples:
+    - {"title":"微信 AI 生态 / 小程序分发重构","system_label":"DISTRIBUTION SYSTEM · 2026","section":"02 / AI DISPATCH","headline":["未来，AI","主动调度服务"],"lede":"用户不再逐个搜索小程序，系统理解意图后，自动筛选服务、补齐上下文，并把最佳结果推到前台。","prompt":"帮我完成一件事","insights":[{"label":"INTENT","text":"自然语言表达任务目标"},{"label":"CONTEXT","text":"位置、时间、偏好自动参与匹配"},{"label":"ACTION","text":"命中服务后直接进入履约路径"}],"map_title":"SERVICE ROUTER / MATCH SCORE","legend":[{"label":"IDLE","tone":"idle"},{"label":"MATCHED","tone":"matched"},{"label":"AI HUB","tone":"hub"}],"hub":{"label":"微信","text":"AI"},"services":[{"label":"SERVICE 01","name":"出行"},{"label":"SERVICE 02","name":"酒店"},{"label":"SERVICE 05","name":"医疗"},{"label":"SERVICE 04","name":"物流"}],"matched_service":{"label":"MATCHED","name":"餐饮","badge":"AI SELECTED"},"metrics":[{"value":"01","label":"Intent parsed"},{"value":"05","label":"Services ranked"},{"value":"1st","label":"Best path selected"}],"footer_note":{"source":"SOURCE: PRODUCT STRATEGY DRAFT","page":"PAGE 02 / 06","status":"STATUS: CONCEPT MODEL"},"bottom_line":{"before":"搜索分发","after_prefix":"AI","after_accent":"调度"}}
+
+license:
+  spdx: Apache-2.0
+  attribution_required: false
+  redistribution_allowed: true
+  commercial_use: true
+
+provenance:
+  origin:
+    name: "User-provided WeChat AI distribution reference screenshots"
+    kind: visual-reference
+    reference: "Two local reference screenshots provided by the project owner on 2026-06-25"
+  via_skill:
+    name: "codex-html-video-template-authoring"
+    author: "OpenAI Codex + nexu-io"
+    url: "https://github.com/nexu-io/html-video"
+    license: "Apache-2.0"
+    source_file: "none - original HTML/CSS implementation"
+  transformation: >
+    Reference screenshots were analyzed for visual vocabulary only: warm-white paper
+    grid, mono section markers, black technical hairlines, WeChat-green highlights,
+    blue AI hub, service-node map, and lower transformation caption. Additional
+    reusable presentation elements were added beyond the reference images: lede,
+    insight rows, route legend, metric strip, source/status note, and page marker.
+    The template is rebuilt as original HTML/CSS keyframes with original sample copy
+    and no copied image assets or source code.
+
+author:
+  name: nexu-io
+  url: https://github.com/nexu-io
+  contact: open-design@nexu.io
+
+version: 0.1.0
+changelog:
+  - version: 0.1.0
+    date: 2026-06-25
+    notes: Added warm-white WeChat AI dispatch system style template with lede, insight rows, route legend, metric strip, source note, CSS line-draw, node reveal, hub pulse, and dispatch highlight motion.
+
+preview:
+  poster: poster.svg
+
+performance:
+  reference_render:
+    duration_sec: 6
+    render_wall_clock_sec: 10
+    machine: "M2 MacBook Air"

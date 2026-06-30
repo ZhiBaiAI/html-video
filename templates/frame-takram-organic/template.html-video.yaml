@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-takram-organic
 name: Takram Organic
+name_zh: "有机网络"
+description_zh: "温暖有机的系统/网络概念展示，适合产品故事和架构说明。"
 description: >
   Soft-tech radial node graph as art — a frosted rounded card holds the message while
   curved links draw and eight nodes pop outward around an evolving core, then everything
@@ -32,6 +34,7 @@ output:
     type: variable
     min_sec: 4
     max_sec: 7
+    default_sec: 6
   alpha: false
   audio:
     supported: true

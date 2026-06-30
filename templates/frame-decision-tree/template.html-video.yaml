@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-decision-tree
 name: Decision Tree
+name_zh: "决策树"
+description_zh: "分支流程图动画，适合教程、选择路径和流程说明。"
 description: >
   Animated flowchart with branching paths
 
@@ -32,7 +34,7 @@ output:
     max_sec: 30
     default_sec: 15
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

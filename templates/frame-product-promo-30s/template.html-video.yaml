@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-product-promo-30s
 name: Product Promo · 30s
+name_zh: "30 秒产品宣传"
+description_zh: "完整 30 秒 SaaS 产品宣传节奏。"
 description: >
   Multi-scene 30-second product promo: problem-type intro, brand reveal,
   benefits flowchart, product surfaces, value pillars, foundation, CTA outro.

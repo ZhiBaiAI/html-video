@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-bold-signal
 name: Bold Signal
+name_zh: "强信号"
+description_zh: "深色底上的高冲击章节卡，适合发布会和章节分隔。"
 description: >
   Bold colored card on a dark gradient — a big section number rolls in, a nav breadcrumb
   fades, a vibrant orange card slides in from the right and the title rises. Confident,
@@ -32,6 +34,7 @@ output:
     type: variable
     min_sec: 3
     max_sec: 6
+    default_sec: 5
   alpha: false
   audio:
     supported: true

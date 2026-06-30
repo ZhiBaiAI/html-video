@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-coral
-name: 珊瑚标题 · Coral
+name: Coral
 name_zh: 珊瑚标题
-description: >
+description_zh: >
   珊瑚色与奶油底搭配，Bebas Neue 全大写标题和 Inter 阅读正文，适合消费品牌、促销和明快发布。
-description_en: >
+description: >
   Bebas Neue uppercase headlines + coral on cream, Inter reading
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

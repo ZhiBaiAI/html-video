@@ -1,6 +1,6 @@
 // html-video studio v0.4 — chat-driven HTML + template gallery + text-node editor
 
-import { t, getLocale, setLocale, AVAILABLE_LOCALES } from './i18n.js';
+import { t, getLocale, setLocale, AVAILABLE_LOCALES } from './i18n.js?v=0.15-zh-default';
 
 const DEFAULT_CLONE_AUDIO_URL = [
   'https://bailian-bmp-prod.oss-cn-beijing.aliyuncs.com/model_offline_result/11751412/1781175777482/qianwen/recording_1781175775568.wav',
@@ -24,12 +24,12 @@ function readStoredChatPaneWidth() {
 
 // Re-render whole UI on language change.
 document.addEventListener('hv-locale-change', () => {
-  document.documentElement.lang = getLocale();
+  document.documentElement.lang = getLocale() === 'zh' ? 'zh-CN' : 'en';
   if (typeof renderToolbar === 'function') renderToolbar();
   if (typeof renderMain === 'function') renderMain();
   if (typeof renderSidebar === 'function') renderSidebar();
 });
-document.documentElement.lang = getLocale();
+document.documentElement.lang = getLocale() === 'zh' ? 'zh-CN' : 'en';
 
 // Narration voices — Bailian CosyVoice v3 flash built-in voice ids.
 // `key` maps to a localized label (soundtrack.voice_<key>).
@@ -42,37 +42,9 @@ const NARRATION_VOICES = [
   { key: 'female_sweet',  voiceId: 'longpaopao_v3' },
 ];
 
-const TEMPLATE_ZH = {
-  'frame-bold-poster': { name: '强海报', desc: '杂志封面式强标题，适合宣言、观点和开场。' },
-  'frame-bold-signal': { name: '强信号', desc: '深色底上的高冲击章节卡，适合发布会和章节分隔。' },
-  'frame-build-minimal': { name: '奢华极简', desc: '大留白、细字重和金色发丝线，适合高端产品与品牌主视觉。' },
-  'frame-creative-voltage': { name: '创意电压', desc: '电蓝分屏和手写线条，适合创意活动和高能标题。' },
-  'frame-data-chart-nyt': { name: '纽约时报数据图', desc: '编辑部风格动态图表，适合数据报道和年度报告。' },
-  'frame-data-rollup': { name: '数据滚动', desc: 'Remotion 原生数字滚动和柱形动画，适合 KPI 数据帧。' },
-  'frame-decision-tree': { name: '决策树', desc: '分支流程图动画，适合教程、选择路径和流程说明。' },
-  'frame-electric-studio': { name: '电蓝工作室', desc: '黑白蓝高对比分屏引语卡，适合使命宣言和客户证言。' },
-  'frame-glitch-title': { name: '故障标题', desc: '赛博故障感标题揭示，适合技术、安全和黑客气质内容。' },
-  'frame-kinetic-type': { name: '动态文字', desc: '文字驱动的动效标题，适合短促有力的开场。' },
-  'frame-light-leak-cinema': { name: '漏光电影感', desc: '电影漏光和氛围开场，适合纪录片、情绪和冷启动。' },
-  'frame-liquid-bg-hero': { name: '液态背景主视觉', desc: '流体背景上的产品主视觉，适合 SaaS 和发布页视频。' },
-  'frame-logo-outro': { name: '品牌片尾', desc: 'Logo 收尾卡，适合视频结尾和频道签名。' },
-  'frame-motion-blur': { name: '运动模糊', desc: '速度分层与拖影展示，适合解释运动、速度和转场技术。' },
-  'frame-nyt-graph': { name: '纽约时报折线图', desc: '新闻编辑感数据揭示，适合趋势和关键指标。' },
-  'frame-pentagram-stat': { name: '五角星指标', desc: '理性高对比的单指标英雄帧，适合 benchmark 和数据亮点。' },
-  'frame-play-mode': { name: '玩乐模式', desc: '轻松活泼的社媒广告感，适合消费产品和趣味开场。' },
-  'frame-product-promo': { name: '产品宣传', desc: '多卖点产品展示，适合功能介绍和主宣传片。' },
-  'frame-product-promo-30s': { name: '30 秒产品宣传', desc: '完整 30 秒 SaaS 产品宣传节奏。' },
-  'frame-swiss-grid': { name: '瑞士网格', desc: '克制网格和排版主导，适合企业汇报和理性标题。' },
-  'frame-takram-organic': { name: '有机网络', desc: '温暖有机的系统/网络概念展示，适合产品故事和架构说明。' },
-  'frame-vignelli': { name: '维涅利红', desc: '红色强调和经典现代主义构图，适合竖版社媒声明。' },
-  'frame-vscode-theme-visualizer': { name: 'VS Code 主题展示', desc: '代码编辑器主题和打字动画展示，适合开发者工具。' },
-  'frame-warm-grain': { name: '暖颗粒', desc: '温暖颗粒感杂志开场，适合生活方式和产品发布。' },
-  'vfx-text-cursor': { name: '文字光标特效', desc: '文本与光标 VFX，适合代码演示和终端气质开场。' },
-};
-
 function templateDisplayName(tpl) {
   if (!tpl) return '';
-  const zh = tpl.name_zh || TEMPLATE_ZH[tpl.id]?.name;
+  const zh = tpl.name_zh;
   const en = tpl.name || tpl.id;
   if (!zh || en.includes(zh)) return en;
   return `${zh} · ${en}`;
@@ -80,7 +52,24 @@ function templateDisplayName(tpl) {
 
 function templateDescription(tpl) {
   if (!tpl) return '';
-  return tpl.description_zh || TEMPLATE_ZH[tpl.id]?.desc || tpl.description || '';
+  return tpl.description_zh || tpl.description || '';
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (timedOut) throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const API = {
@@ -91,7 +80,7 @@ const API = {
   deleteProject: id => fetch(`/api/projects/${id}`, { method: 'DELETE' }).then(r => r.json()),
   templates: () => fetch('/api/templates').then(r => r.json()),
   agents: () => fetch('/api/agents').then(r => r.json()),
-  setTemplate: (id, tid) => fetch(`/api/projects/${id}/template`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template_id: tid }) }).then(r => r.json()),
+  setTemplate: (id, tid) => fetchWithTimeout(`/api/projects/${id}/template`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template_id: tid }) }).then(readApiResult),
   restyleTemplate: id => fetch(`/api/projects/${id}/template/restyle`, { method: 'POST', headers: { accept: 'text/event-stream' } }),
   setAgent: (id, aid, model) => fetch(`/api/projects/${id}/agent`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ agent_id: aid, ...(model !== undefined && { agent_model: model }) }) }).then(r => r.json()),
   exportMp4: id => fetch(`/api/projects/${id}/export`, { method: 'POST' }).then(r => r.json()),
@@ -262,6 +251,12 @@ function syncNarrationVoiceSelect() {
 function defaultProjectName(seed) {
   const n = (state.projects?.length ?? 0) + (seed ?? 0) + 1;
   return `Untitled ${String(n).padStart(2, '0')}`;
+}
+
+function projectStatusLabel(status) {
+  const key = `project.status.${status || 'draft'}`;
+  const translated = t(key);
+  return translated === key ? String(status || '') : translated;
 }
 
 /**
@@ -643,8 +638,8 @@ function renderSidebar() {
     div.className = 'project-row' + (p.id === state.selectedId ? ' active' : '');
     div.innerHTML = `
       <div class="name">${esc(p.name)}</div>
-      <div class="meta">${p.template_id ? esc(p.template_id) : 'no template'} · ${p.status}</div>
-      <button class="row-menu-btn" title="More" data-pid="${esc(p.id)}">⋯</button>
+      <div class="meta">${p.template_id ? esc(p.template_id) : esc(t('project.no_template'))} · ${esc(projectStatusLabel(p.status))}</div>
+      <button class="row-menu-btn" title="${esc(t('sidebar.menu.more'))}" aria-label="${esc(t('sidebar.menu.more'))}" data-pid="${esc(p.id)}">⋯</button>
     `;
     div.onclick = (e) => {
       // Ignore clicks that started inside the menu button.
@@ -1078,7 +1073,7 @@ function renderMain() {
                   </select>
                 </label>
                 <div class="talking-actions">
-                  <input type="file" id="talking-file" accept="video/*" style="display:none" />
+                  <input type="file" id="talking-file" accept="video/*,image/*" style="display:none" />
                   <button class="st-generate" id="btn-talking-upload">${t('talking.upload')}</button>
                   <button class="st-draft" id="btn-talking-transcribe">${t('talking.transcribe')}</button>
                   <button class="st-clear" id="btn-talking-clear">${t('talking.clear')}</button>
@@ -1241,23 +1236,32 @@ function wireTalkingHeadPanel() {
   const render = () => {
     const th = state.selected?.talkingHead;
     const assets = state.selected?.assets || [];
-    const video = th?.videoAssetId ? assets.find((a) => a.id === th.videoAssetId) : null;
+    const media = th?.videoAssetId ? assets.find((a) => a.id === th.videoAssetId) : null;
+    const isVideo = media?.type === 'video';
+    const isImage = media?.type === 'image';
     const transcript = th?.transcriptAssetId ? assets.find((a) => a.id === th.transcriptAssetId) : null;
-    transcribeBtn.disabled = !video || state.transcribingTalkingHead;
+    transcribeBtn.disabled = !isVideo || state.transcribingTalkingHead;
     clearBtn.disabled = !th;
     if (audioModeSelect) {
       audioModeSelect.disabled = !th;
-      audioModeSelect.value = normalizeAudioMode(th?.audioMode);
+      const originalOption = audioModeSelect.querySelector('option[value="original"]');
+      if (originalOption) originalOption.disabled = !isVideo;
+      audioModeSelect.value = isVideo ? normalizeAudioMode(th?.audioMode) : 'synthetic';
     }
     if (previewEl) {
-      const videoSrc = video?.path ? `/asset?path=${encodeURIComponent(video.path)}` : '';
-      previewEl.innerHTML = video
+      const mediaSrc = media?.path ? `/asset?path=${encodeURIComponent(media.path)}` : '';
+      const preview = isVideo
+        ? `<video controls src="${mediaSrc}"></video>`
+        : isImage
+          ? `<img src="${mediaSrc}" alt="" />`
+          : '';
+      previewEl.innerHTML = media
         ? `<div class="talking-source">
-            <video controls src="${videoSrc}"></video>
+            ${preview}
             <div class="talking-meta">
-              <b>${esc(video.metadata?.filename || 'talking-head video')}</b>
-              <span>${transcript ? t('talking.transcript_ready') : t('talking.transcript_missing')}</span>
-              <span>${normalizeAudioMode(th?.audioMode) === 'original' ? t('talking.audio_original') : t('talking.audio_synthetic')}</span>
+              <b>${esc(media.metadata?.filename || t('talking.source_fallback'))}</b>
+              <span>${isVideo ? (transcript ? t('talking.transcript_ready') : t('talking.transcript_missing')) : t('talking.image_overlay_only')}</span>
+              <span>${isVideo && normalizeAudioMode(th?.audioMode) === 'original' ? t('talking.audio_original') : t('talking.audio_synthetic')}</span>
             </div>
           </div>`
         : `<div class="soundtrack-hint">${t('talking.empty')}</div>`;
@@ -1291,7 +1295,9 @@ function wireTalkingHeadPanel() {
   }
 
   transcribeBtn.onclick = async () => {
-    if (!state.selected?.talkingHead?.videoAssetId) return;
+    const th = state.selected?.talkingHead;
+    const media = th?.videoAssetId ? (state.selected?.assets || []).find((a) => a.id === th.videoAssetId) : null;
+    if (!media || media.type !== 'video') return;
     state.transcribingTalkingHead = true;
     transcribeBtn.disabled = true;
     if (statusEl) statusEl.textContent = t('talking.transcribing');
@@ -1951,9 +1957,11 @@ function renderFooter() {
   const fs = document.getElementById('footer-status');
   if (!fs) return;
   if (p) {
-    fs.innerHTML = `<b>${esc(p.name)}</b> · ${p.templateId ? `template <b>${esc(p.templateId)}</b>` : '<i>no template</i>'} · ${p.status}`;
+    fs.innerHTML = `<b>${esc(p.name)}</b> · ${p.templateId
+      ? `${esc(t('project.template'))} <b>${esc(p.templateId)}</b>`
+      : `<i>${esc(t('project.no_template'))}</i>`} · ${esc(projectStatusLabel(p.status))}`;
   } else {
-    fs.textContent = 'no project';
+    fs.textContent = t('app.no_project');
   }
 }
 
@@ -1962,13 +1970,26 @@ function renderChatLog() {
   const log = document.getElementById('chat-log');
   if (!log) return;
   if (!state.messages.length) {
+    const availableAgents = state.agents.filter(a => a.available);
+    if (state.agents.length > 0 && availableAgents.length === 0) {
+      log.innerHTML = `<div class="chat-empty"><div><div class="ico">⚙️</div>
+        <div style="font-weight:500;margin-bottom:6px;">${t('chat.no_agent.title')}</div>
+        ${t('chat.no_agent.body')}
+        <div style="margin-top:12px;">
+          <button class="empty-action" id="chat-open-agent-settings">${t('chat.no_agent.action')}</button>
+        </div>
+      </div></div>`;
+      const btn = document.getElementById('chat-open-agent-settings');
+      if (btn) btn.onclick = () => openSettingsModal('agent');
+      return;
+    }
     log.innerHTML = `<div class="chat-empty"><div><div class="ico">💬</div>
       <div style="font-weight:500;margin-bottom:6px;">${t('chat.empty.title')}</div>
       ${t('chat.empty.body')}
       <div class="examples">
-        <b>"Warm-grain magazine outro: Open Design — design that evolves itself"</b>
-        <b>"Cyberpunk glitch title saying SYSTEM ONLINE, neon cyan/magenta"</b>
-        <b>"Swiss-grid data card: Templates 231, Skills 15, Systems 150, Craft 11"</b>
+        <b>“${esc(t('chat.empty.example_1'))}”</b>
+        <b>“${esc(t('chat.empty.example_2'))}”</b>
+        <b>“${esc(t('chat.empty.example_3'))}”</b>
       </div>
     </div></div>`;
     return;
@@ -2167,7 +2188,7 @@ function renderMessage(m, idx) {
   if (m.role === 'thinking') return `<div class="msg thinking">${esc(m.content || t('chat.thinking'))}</div>`;
   if (m.role === 'export-done') {
     const path = m.content || '';
-    const fname = path.split('/').pop() || 'output.mp4';
+    const fname = path.split(/[\\/]/).pop() || 'output.mp4';
     return `<div class="msg export-done">
       <div class="export-title">${t('export.title')}</div>
       <div class="export-path"><code>${esc(path)}</code></div>
@@ -2757,14 +2778,16 @@ function attachPreviewScaler() {
   if (!frame) return;
   const apply = () => {
     const w = frame.clientWidth;
-    if (!w) return;
+    const h = frame.clientHeight;
+    if (!w || !h) return;
     // Scale by the inner element's native design width (not a hardcoded 1920)
     // so non-16:9 aspects (1080-wide) shrink correctly too. A native (enhanced)
     // frame uses a <video> instead of an <iframe> — scale it the same way, else
     // the 1920×1080 MP4 overflows and the frame gets cropped.
     const inner = frame.querySelector('iframe, video');
     const nativeW = inner ? (parseFloat(inner.style.width) || 1920) : 1920;
-    frame.style.setProperty('--preview-scale', (w / nativeW).toFixed(4));
+    const nativeH = inner ? (parseFloat(inner.style.height) || 1080) : 1080;
+    frame.style.setProperty('--preview-scale', Math.min(w / nativeW, h / nativeH).toFixed(4));
   };
   apply();
   if (_previewResizeObserver) _previewResizeObserver.disconnect();
@@ -2796,12 +2819,18 @@ function renderFramesStrip() {
     return;
   }
   strip.classList.add('has-frames');
-  // Each chip = label + mini iframe of the frame's actual HTML, transform-
-  // scaled so the 1920×1080 page fits in a ~180×100 thumb. sandbox blocks
-  // navigation; allow-scripts so any opening animation runs.
+  // Each chip = label + mini iframe of the frame's actual HTML, scaled from the
+  // project's real native resolution into a 178×100 bounding box. This keeps
+  // portrait / square / 4:5 thumbnails honest instead of forcing 16:9.
   // Bust cache when frame content changes (re-renders point to a new
   // versioned URL via `?v=<timestamp>` derived from project.updatedAt).
   const ver = p.updatedAt ? new Date(p.updatedAt).getTime() : Date.now();
+  const res = p.preferences?.resolution ?? { width: 1920, height: 1080 };
+  const nativeW = Number(res.width) || 1920;
+  const nativeH = Number(res.height) || 1080;
+  const thumbScale = Math.min(178 / nativeW, 100 / nativeH);
+  const thumbW = Math.max(1, Math.round(nativeW * thumbScale));
+  const thumbH = Math.max(1, Math.round(nativeH * thumbScale));
   const tabs = frames.map((f) => {
     const isActive = f.graphNodeId === state.activeFrameId;
     const isFocus = f.graphNodeId === state.iterateFocusFrameId;
@@ -2828,8 +2857,8 @@ function renderFramesStrip() {
         enhanceCtl = `<span class="frame-enhance" data-fid="${esc(f.graphNodeId)}" data-act="enhance" title="${esc(t('frames.enhance_hint'))}">${t('frames.enhance')}</span>`;
       }
     }
-    return `<button class="${cls}${isData ? ' is-data' : ''}" data-fid="${esc(f.graphNodeId)}">
-      <div class="frame-thumb">
+    return `<button class="${cls}${isData ? ' is-data' : ''}" data-fid="${esc(f.graphNodeId)}" style="width:${thumbW + 2}px">
+      <div class="frame-thumb" style="width:${thumbW}px;height:${thumbH}px;--thumb-native-width:${nativeW}px;--thumb-native-height:${nativeH}px;--thumb-scale:${thumbScale}">
         ${thumbInner}
         ${regenCtl}
         ${enhanceCtl}
@@ -3248,6 +3277,34 @@ async function sendMessage() {
             }
             state.messages[assistantIdx].content += '\n\n⚠️ ' + ev.message;
             renderChatLog();
+          } else if (ev.type === 'source_status') {
+            const status = ev.status || 'ok';
+            const label = ev.title || ev.url || 'source';
+            const msg = status === 'failed'
+              ? t('source.fetch_failed', { url: ev.url || label, message: ev.message || '' })
+              : ev.truncated
+                ? t('source.fetch_ok_truncated', { title: label })
+                : t('source.fetch_ok', { title: label });
+            state.messages.push({
+              role: status === 'failed' ? 'system' : 'preview-event',
+              content: msg,
+              ts: Date.now(),
+            });
+            renderChatLog();
+          } else if (ev.type === 'template_auto_selected') {
+            const label = ev.template_name || ev.template_id || 'template';
+            state.messages.push({
+              role: 'preview-event',
+              content: t('chat.template_auto_selected', { name: label }),
+              ts: Date.now(),
+            });
+            try {
+              const pr = await API.getProject(state.selected.id);
+              state.selected = pr.project;
+              renderToolbar();
+              renderFooter();
+            } catch { /* best-effort UI sync; generation continues */ }
+            renderChatLog();
           } else if (ev.type === 'error') {
             if (assistantIdx === -1) {
               state.messages[thinkingIdx] = { role: 'system', content: '⚠️ ' + ev.message, ts: Date.now() };
@@ -3495,21 +3552,6 @@ function openNarrateModal() {
     }
   }
 
-  // Populate the template <select> with all available templates.
-  // Pre-select the project's current template so the user can keep it or switch.
-  const tplSel = document.getElementById('narrate-template');
-  if (tplSel) {
-    const currentTplId = state.selected?.templateId;
-    const noneOpt = `<option value="">${esc(t('narrate.template_none'))}</option>`;
-    const tplOpts = (state.templates || []).map((tpl) => {
-      const name = templateDisplayName(tpl) || tpl.id;
-      const selected = tpl.id === currentTplId ? ' selected' : '';
-      return `<option value="${esc(tpl.id)}"${selected}>${esc(name)}</option>`;
-    }).join('');
-    tplSel.innerHTML = noneOpt + tplOpts;
-    if (!currentTplId) tplSel.value = '';
-  }
-
   // Pre-select aspect based on the project's current resolution.
   const aspectSel = document.getElementById('narrate-aspect');
   if (aspectSel && state.selected) {
@@ -3522,6 +3564,29 @@ function openNarrateModal() {
       else aspectSel.value = '16:9';
     }
   }
+
+  // Only offer templates that support the selected output aspect. Forcing a
+  // 16:9-only structure into 9:16 / 4:5 creates a small landscape composition
+  // inside a larger portrait canvas, which is the exact "shrunk frame" failure.
+  const tplSel = document.getElementById('narrate-template');
+  const templateSupportsNarrateAspect = (tpl, aspect) => {
+    const aspects = tpl?.output?.resolution?.supported_aspects;
+    return !Array.isArray(aspects) || aspects.length === 0 || aspects.includes(aspect);
+  };
+  const refreshNarrateTemplates = () => {
+    if (!tplSel) return;
+    const aspect = aspectSel?.value || '16:9';
+    const prior = tplSel.value || state.selected?.templateId || '';
+    const compatible = (state.templates || []).filter((tpl) => templateSupportsNarrateAspect(tpl, aspect));
+    const noneOpt = `<option value="">${esc(t('narrate.template_none'))}</option>`;
+    tplSel.innerHTML = noneOpt + compatible.map((tpl) => {
+      const name = templateDisplayName(tpl) || tpl.id;
+      return `<option value="${esc(tpl.id)}">${esc(name)}</option>`;
+    }).join('');
+    tplSel.value = compatible.some((tpl) => tpl.id === prior) ? prior : '';
+  };
+  refreshNarrateTemplates();
+  if (aspectSel) aspectSel.onchange = refreshNarrateTemplates;
 
   // Reset to the script tab + cleared inputs each open.
   setNarrateTab('script');
@@ -3609,6 +3674,7 @@ async function runNarrate() {
   const payload = {
     mode: isTopic ? 'topic' : 'script',
     agentId,
+    ...(state.selected.agentModel && { agentModel: state.selected.agentModel }),
     aspect,
     ...(voiceId && { voiceId }),
     ...(templateId && { templateId }),
@@ -3658,9 +3724,13 @@ async function runNarrate() {
         try { ev = JSON.parse(line.slice(6)); } catch { continue; }
         if (ev.type === 'narrate_progress') {
           narrateLog(esc(t(ev.message_key ?? ev.message ?? '')));
+        } else if (ev.type === 'narrate_design_progress') {
+          narrateLog(esc(ev.message ?? ''));
         } else if (ev.type === 'narrate_script') {
           // topic-mode: surface the agent-written script so the user sees it.
           narrateLog(`<b>${esc(t('narrate.tab_script'))}</b>: ${esc(ev.script.slice(0, 120))}${ev.script.length > 120 ? '…' : ''}`);
+        } else if (ev.type === 'template_auto_selected') {
+          narrateLog(esc(t('narrate.template_auto_selected', { name: ev.template_name || ev.template_id || 'template' })));
         } else if (ev.type === 'narrate_graph') {
           narrateLog(`✓ ${ev.frame_count} frames`);
         } else if (ev.type === 'narrate_frame_done') {
@@ -3715,23 +3785,22 @@ function openGallery() {
   if (!state.selected) return;
   document.getElementById('gallery-modal').classList.add('show');
   const grid = document.getElementById('gallery');
+  const previewLabel = t('gallery.preview');
 
-  // Each card's iframe loads the template's actual entry HTML (`index.html`,
-  // dropped under templates/<id>/ so /template-asset/<id>/index.html serves
-  // it). The 1920×1080 (or 1080×1920) source is transform-scaled to fit
-  // the card via a CSS variable set per-card after layout.
+  // Cards stay lightweight. A visible preview button opens the static sample
+  // frame browser; selecting a template remains a separate confirmed action.
   grid.innerHTML = state.templates.map(t => {
     const sel = state.selected?.templateId === t.id ? ' selected' : '';
     const tags = (t.tags || []).slice(0, 4).map((tg) => `<span class="tag">${esc(tg)}</span>`).join('');
     const portrait = isPortraitTemplate(t);
-    const entry = templateEntryPath(t);
-    // Poster-mode templates (entry only stitches sub-comps via
-    // data-composition-src) iframe-render blank until the HF player ships —
-    // show the shipped poster instead. Falls back to the iframe when the
-    // backend couldn't find a poster file (poster_url null).
-    const inner = t.poster_url
-      ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(templateDisplayName(t) || t.id)}" loading="lazy" />`
-      : `<div class="poster-fallback"><span>${esc(templateDisplayName(t) || t.id)}</span></div>`;
+    // Gallery cards stay lightweight: use static posters when available and
+    // reserve live iframes for the fullscreen preview. Loading dozens of
+    // animated iframes at once creates noisy 404/resource warnings and makes
+    // template browsing feel sluggish.
+    const inner =
+      t.poster_url
+        ? `<img class="poster" src="${esc(t.poster_url)}" alt="${esc(templateDisplayName(t) || t.id)}" loading="lazy" />`
+        : `<div class="poster-fallback"><span>${esc(t.category || t.engine || 'template')}</span><b>${esc(templateDisplayName(t) || t.id)}</b></div>`;
     return `<div class="gallery-card${sel}" data-id="${t.id}">
       <div class="preview ${portrait ? 'portrait' : ''}" data-portrait="${portrait}">
         ${inner}
@@ -3740,6 +3809,9 @@ function openGallery() {
         <div class="name">${esc(templateDisplayName(t))}</div>
         <div class="desc">${esc(templateDescription(t))}</div>
         <div class="tags">${tags}</div>
+      </div>
+      <div class="card-actions">
+        <button type="button" class="preview-btn" data-preview-id="${esc(t.id)}">▣ ${esc(previewLabel)}</button>
       </div>
     </div>`;
   }).join('');
@@ -3754,26 +3826,12 @@ function openGallery() {
       if (tpl) openTemplatePreviewModal(tpl);
     };
   });
-
-  // Resize observer recomputes --gallery-scale per card so 1920×1080 fits
-  // the actual rendered card width.
-  setTimeout(() => applyGalleryScales(grid), 0);
-  if (galleryResizeObserver) galleryResizeObserver.disconnect();
-  galleryResizeObserver = new ResizeObserver(() => applyGalleryScales(grid));
-  grid.querySelectorAll('.gallery-card .preview').forEach((p) => galleryResizeObserver.observe(p));
-}
-
-let galleryResizeObserver = null;
-function applyGalleryScales(grid) {
-  grid.querySelectorAll('.gallery-card .preview').forEach((p) => {
-    const w = p.clientWidth;
-    if (!w) return;
-    const portrait = p.dataset.portrait === 'true';
-    // Landscape fills the 16:9 box by width. Portrait keeps the same 16:9
-    // box but is scaled to fit the box HEIGHT (1080×1920 → fit by height,
-    // centred), so its card stays the same height as the rest of the grid.
-    const scale = portrait ? p.clientHeight / 1920 : w / 1920;
-    p.style.setProperty('--gallery-scale', scale.toFixed(4));
+  grid.querySelectorAll('.preview-btn').forEach(btn => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      const tpl = state.templates.find((x) => x.id === btn.dataset.previewId);
+      if (tpl) openTemplatePreviewModal(tpl);
+    };
   });
 }
 
@@ -3782,21 +3840,8 @@ function isPortraitTemplate(t) {
   return aspects.includes('9:16') && !aspects.includes('16:9');
 }
 
-function templateEntryPath(t) {
-  // The template's entry HTML is declared as `source_entry` in its
-  // template.html-video.yaml — some templates use `source/index.html`,
-  // others a top-level `index.html`. The /api/templates response now
-  // surfaces this field; fall back to `index.html` only if it's missing.
-  const entry = t?.source_entry;
-  return typeof entry === 'string' && entry ? entry : 'index.html';
-}
-
 function closeGallery() {
   document.getElementById('gallery-modal').classList.remove('show');
-  if (galleryResizeObserver) {
-    galleryResizeObserver.disconnect();
-    galleryResizeObserver = null;
-  }
 }
 
 // ============== Template fullscreen preview ==============
@@ -3818,43 +3863,16 @@ function openTemplatePreviewModal(tpl) {
   });
 
   renderTemplateSource(tpl);
-
-  const frame = document.getElementById('tpl-preview-frame');
-  const portrait = isPortraitTemplate(tpl);
-  frame.classList.toggle('portrait', portrait);
-
-  const iframe = document.getElementById('tpl-preview-iframe');
-  const poster = document.getElementById('tpl-preview-poster');
-  const entry = templateEntryPath(tpl);
-  // Poster-mode templates render blank in a live iframe (need the unbuilt HF
-  // player) — show the shipped poster instead. Fall back to the iframe if the
-  // backend reported no poster file (poster_url null).
-  const usePoster = tpl.preview_mode === 'poster' && tpl.poster_url;
-  if (usePoster) {
-    iframe.src = 'about:blank';
-    iframe.hidden = true;
-    poster.src = `${tpl.poster_url}?t=${Date.now()}`;
-    poster.hidden = false;
-  } else {
-    poster.src = '';
-    poster.hidden = true;
-    iframe.hidden = false;
-    iframe.src = `/template-asset/${encodeURIComponent(tpl.id)}/${entry}?t=${Date.now()}`;
-  }
-
-  const apply = () => {
-    const w = frame.clientWidth;
-    const h = frame.clientHeight;
-    if (!w || !h) return;
-    const baseW = portrait ? 1080 : 1920;
-    const baseH = portrait ? 1920 : 1080;
-    const s = Math.min(w / baseW, h / baseH);
-    frame.style.setProperty('--tpl-preview-scale', s.toFixed(4));
-  };
-  apply();
+  renderTemplatePreviewGuide(tpl);
+  renderTemplateStaticSamples(tpl);
   if (_tplPreviewResizeObserver) _tplPreviewResizeObserver.disconnect();
-  _tplPreviewResizeObserver = new ResizeObserver(apply);
-  _tplPreviewResizeObserver.observe(frame);
+  _tplPreviewResizeObserver = new ResizeObserver((entries) => {
+    entries.forEach((entry) => applyTemplateSampleScale(entry.target));
+  });
+  modal.querySelectorAll('.tpl-sample-canvas').forEach((canvas) => {
+    applyTemplateSampleScale(canvas);
+    _tplPreviewResizeObserver.observe(canvas);
+  });
 
   const useBtn = document.getElementById('tpl-preview-use');
   const cancelBtn = document.getElementById('tpl-preview-cancel');
@@ -3862,6 +3880,7 @@ function openTemplatePreviewModal(tpl) {
   const confirmBar = document.getElementById('tpl-preview-confirm-bar');
   const confirmMsg = document.getElementById('tpl-preview-confirm-msg');
   const confirmYes = document.getElementById('tpl-preview-confirm-yes');
+  const confirmRestyle = document.getElementById('tpl-preview-confirm-restyle');
   const confirmNo = document.getElementById('tpl-preview-confirm-no');
 
   // Hide the confirm bar when opening the modal.
@@ -3877,27 +3896,40 @@ function openTemplatePreviewModal(tpl) {
 
   // Core apply logic — called from useBtn (no existing template) or from
   // the inline confirm bar (replacing an existing template).
-  const doApply = async () => {
-    if (!state.selected) return;
+  const canRestyleAfterApply = () => (state.selected?.frames?.length ?? 0) > 1
+    && state.agents.some((agent) => agent.available);
+  let applying = false;
+  const doApply = async ({ restyleAfter = false } = {}) => {
+    if (!state.selected || applying) return;
+    const projectId = state.selected.id;
+    const shouldRestyle = restyleAfter && canRestyleAfterApply();
+    applying = true;
     if (confirmBar) confirmBar.hidden = true;
     useBtn.disabled = true;
-    const shouldRestyleFrames = Array.isArray(state.selected.frames) && state.selected.frames.length > 0;
+    if (confirmYes) confirmYes.disabled = true;
+    if (confirmRestyle) confirmRestyle.disabled = true;
+    if (confirmNo) confirmNo.disabled = true;
+    const priorLabel = useBtn.textContent;
+    useBtn.textContent = '…';
     try {
-      await API.setTemplate(state.selected.id, tpl.id);
+      const result = await API.setTemplate(projectId, tpl.id);
+      if (!result.ok) throw new Error(result.data?.error || `HTTP ${result.status}`);
       closeTemplatePreviewModal();
       closeGallery();
-      await selectProject(state.selected.id);
+      await selectProject(projectId);
       toast(t('tpl_preview.applied', { name: templateDisplayName(tpl) || tpl.id }), 'success');
-      if (shouldRestyleFrames) {
+      if (shouldRestyle) {
         void startTemplateRestyleStream(templateDisplayName(tpl) || tpl.id);
       }
     } catch (e) {
-      closeTemplatePreviewModal();
-      closeGallery();
-      if (state.selected) { renderMain(); renderToolbar(); }
       toast(`⚠️ ${e?.message ?? e}`, 'error');
     } finally {
+      applying = false;
       useBtn.disabled = false;
+      useBtn.textContent = priorLabel;
+      if (confirmYes) confirmYes.disabled = false;
+      if (confirmRestyle) confirmRestyle.disabled = false;
+      if (confirmNo) confirmNo.disabled = false;
     }
   };
 
@@ -3912,18 +3944,58 @@ function openTemplatePreviewModal(tpl) {
       }
       if (confirmMsg) confirmMsg.textContent = t('tpl_preview.replace_confirm', { name: templateDisplayName(tpl) || tpl.id });
       if (confirmBar) confirmBar.hidden = false;
-      useBtn.textContent = t('tpl_preview.confirm_yes');
+      if (confirmRestyle) confirmRestyle.hidden = !canRestyleAfterApply();
       return;
     }
-    doApply();
+    void doApply();
   };
-  if (confirmYes) confirmYes.onclick = doApply;
-  if (confirmNo) confirmNo.onclick = () => {
-    if (confirmBar) confirmBar.hidden = true;
-    useBtn.textContent = t('tpl_preview.use');
-  };
+  if (confirmYes) confirmYes.onclick = () => void doApply();
+  if (confirmRestyle) confirmRestyle.onclick = () => void doApply({ restyleAfter: true });
+  if (confirmNo) confirmNo.onclick = () => { if (confirmBar) confirmBar.hidden = true; };
   cancelBtn.onclick = closeTemplatePreviewModal;
   closeBtn.onclick = closeTemplatePreviewModal;
+}
+
+function renderTemplatePreviewGuide(tpl) {
+  const render = (id, prefix, values) => {
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.innerHTML = (values || []).map((value) => `<span>${esc(t(`${prefix}.${value}`))}</span>`).join('');
+  };
+  render('tpl-preview-elements', 'tpl_preview.element', tpl.preview_elements);
+  render('tpl-preview-motion', 'tpl_preview.motion', tpl.preview_motion);
+}
+
+function renderTemplateStaticSamples(tpl) {
+  const box = document.getElementById('tpl-preview-samples');
+  if (!box) return;
+  const portrait = isPortraitTemplate(tpl);
+  const frames = Array.isArray(tpl.preview_frames) && tpl.preview_frames.length
+    ? tpl.preview_frames
+    : tpl.poster_url
+      ? [{ label: 'overview', url: tpl.poster_url, kind: 'poster' }]
+      : [];
+  box.innerHTML = frames.map((frame, index) => {
+    const labelKey = `tpl_preview.frame.${frame.label}`;
+    const translated = t(labelKey);
+    const label = translated === labelKey ? frame.label : translated;
+    const media = frame.kind === 'poster'
+      ? `<img src="${esc(frame.url)}" alt="${esc(label)}" loading="lazy" />`
+      : `<iframe title="${esc(label)}" sandbox="allow-scripts allow-same-origin" src="${esc(frame.url)}&v=${Date.now()}" loading="lazy"></iframe>`;
+    return `<figure class="tpl-sample">
+      <div class="tpl-sample-canvas${portrait ? ' portrait' : ''}" data-portrait="${portrait}">${media}</div>
+      <figcaption><b>${esc(label)}</b><span>${String(index + 1).padStart(2, '0')} / ${String(frames.length).padStart(2, '0')}</span></figcaption>
+    </figure>`;
+  }).join('');
+}
+
+function applyTemplateSampleScale(canvas) {
+  const portrait = canvas?.dataset?.portrait === 'true';
+  const w = canvas?.clientWidth ?? 0;
+  const h = canvas?.clientHeight ?? 0;
+  if (!w || !h) return;
+  const scale = portrait ? h / 1920 : w / 1920;
+  canvas.style.setProperty('--tpl-sample-scale', scale.toFixed(4));
 }
 
 // Render the three-layer provenance (RFC-07) for the previewed template so the
@@ -3975,11 +4047,9 @@ function closeTemplatePreviewModal() {
     _tplPreviewResizeObserver.disconnect();
     _tplPreviewResizeObserver = null;
   }
-  // Stop the iframe from continuing to play in the background.
-  const iframe = document.getElementById('tpl-preview-iframe');
-  if (iframe) iframe.src = 'about:blank';
-  const poster = document.getElementById('tpl-preview-poster');
-  if (poster) { poster.src = ''; poster.hidden = true; }
+  document.querySelectorAll('#tpl-preview-samples iframe').forEach((iframe) => { iframe.src = 'about:blank'; });
+  const samples = document.getElementById('tpl-preview-samples');
+  if (samples) samples.innerHTML = '';
   _tplPreviewCurrent = null;
 }
 
@@ -4419,7 +4489,7 @@ function renderSettingsAgent(panel) {
               ? (isCurrent
                   ? `<span style="font-size:11px;color:var(--accent);font-family:var(--font-mono)">${esc(t('settings.agent.in_use'))}</span>`
                   : `<button data-act="use" class="primary-action" style="background:var(--accent);border-color:var(--accent);color:var(--accent-fg)">${esc(t('settings.agent.use'))}</button>`)
-              : (a.installUrl ? `<a href="${a.installUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-faint)">install ↗</a>` : '')}
+              : (a.installUrl ? `<a href="${a.installUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-faint)">${esc(t('settings.agent.install'))}</a>` : '')}
           </div>
           <div class="agent-test-result" data-test-result="${esc(a.id)}" style="display:none;grid-column:1 / -1"></div>
         </div>`;

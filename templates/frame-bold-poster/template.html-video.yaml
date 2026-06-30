@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-bold-poster
 name: Bold Poster
+name_zh: "强海报"
+description_zh: "杂志封面式强标题，适合宣言、观点和开场。"
 description: >
   A 1970s European editorial poster, in motion. A red rule draws across under a mono
   kicker, a giant Shrikhand figure rotates and drops in, a three-line headline rises
@@ -34,6 +36,7 @@ output:
     type: variable
     min_sec: 4
     max_sec: 6
+    default_sec: 5
   alpha: false
   audio:
     supported: true

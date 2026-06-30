@@ -4,12 +4,12 @@
   <img src="docs/assets/hero.png" alt="html-video — HTML becomes video, on your laptop" width="100%" />
 </p>
 
-> **HTML becomes video — on your laptop.** Bring your local coding agent (Open Design · Windsurf CLI · Trae CLI · Claude Code · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · or the Anthropic API). Describe a video, **paste an article link / GitHub repo**, or upload a talking-head clip, and the agent turns it into a multi-frame, fully animated video — then renders it to a real MP4 right on your machine. One agent loop, pluggable rendering engines, a curated template gallery, optional AI soundtrack or source-video voice. Apache-2.0, no per-render fees, no vendor lock-in.
+> **HTML becomes video — on your laptop.** Bring your local coding agent (Open Design · Windsurf CLI · Trae CLI · Claude Code · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · or the Anthropic API). Describe a video, **paste an article link / GitHub repo**, or upload a talking-head clip, and the agent turns it into a multi-frame, fully animated video — then renders it to a real MP4 right on your machine. One agent loop, pluggable rendering engines, a curated template gallery, optional AI narration or source-video voice. Apache-2.0, no per-render fees, no vendor lock-in.
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue.svg?style=flat-square" /></a>
   <a href="#supported-agents"><img alt="Agents" src="https://img.shields.io/badge/agents-14%20backends-111?style=flat-square" /></a>
-  <a href="#showcase"><img alt="Templates" src="https://img.shields.io/badge/templates-21-3ce6ac?style=flat-square" /></a>
+  <a href="#showcase"><img alt="Templates" src="https://img.shields.io/badge/templates-37-3ce6ac?style=flat-square" /></a>
   <a href="#turn-a-link-into-a-video"><img alt="Sources" src="https://img.shields.io/badge/from-article%20%C2%B7%20repo%20%C2%B7%20prompt-9b59b6?style=flat-square" /></a>
   <a href="#audio--talking-head"><img alt="Audio" src="https://img.shields.io/badge/audio-AI%20voice%20%C2%B7%20talking--head-e67e22?style=flat-square" /></a>
   <a href="#quick-start"><img alt="Quickstart" src="https://img.shields.io/badge/quickstart-3%20commands-22a34a?style=flat-square" /></a>
@@ -61,7 +61,7 @@ Every template below is a real, animated single-file HTML video — these are li
 </tr>
 </table>
 
-…and 15 more, including multi-scene product promos, kinetic type, Swiss-grid and Vignelli data cards, decision-tree explainers, Takram-organic motion, and warm-grain editorial. Browse all 21 live in the studio gallery.
+…and 31 more, including multi-scene product promos, kinetic type, Swiss-grid and Vignelli data cards, decision-tree explainers, Takram-organic motion, warm-grain editorial, and Remotion-native data rollups. Browse all 37 live in the studio gallery.
 
 ---
 
@@ -72,7 +72,7 @@ HTML→Video is a real category — but every engine is opinionated, and each wa
 | Engine | Paradigm | Tradeoff | In html-video |
 |---|---|---|---|
 | [Hyperframes](https://github.com/heygen-com/hyperframes) | HTML + CSS + GSAP, agent-skill driven | Single rendering paradigm | ✅ **Shipped** — the default engine; renders real MP4 via headless Chromium + ffmpeg |
-| [Remotion](https://www.remotion.dev/) | React components | Source-available, paid above 4 devs | 🗺️ Planned |
+| [Remotion](https://www.remotion.dev/) | React components | Source-available, paid above 4 devs | ✅ **Optional enhancement** — native data-frame rendering via `frame-data-rollup` |
 | [Motion Canvas](https://github.com/motion-canvas/motion-canvas) · [Revideo](https://github.com/redotvideo/revideo) | TypeScript generators on canvas | Best for explainers, code-first | 🗺️ Planned |
 | [Manim](https://github.com/3b1b/manim) & friends | Math / 3D first | Niche | 🗺️ Researching |
 
@@ -82,7 +82,7 @@ Picking the right engine per use case, learning each model, and stitching them i
 
 The same idea powers [Open Design](https://github.com/nexu-io/open-design) in the *design* space — an agent meta-layer over many tools. html-video is the *motion* counterpart from the same team.
 
-> **Status:** the pluggable-engine architecture is in place, and the **Hyperframes engine is fully wired up and renders real MP4** — headless Chromium records the animated HTML frame-by-frame and ffmpeg encodes it (libx264). Remotion, Motion Canvas / Revideo, and Manim are on the roadmap: the adapter interface is designed for them, but their adapters aren't built yet. The "In html-video" column above is the single source of truth for what's actually runnable today.
+> **Status:** the pluggable-engine architecture is in place. The **Hyperframes engine is fully wired up and renders real MP4** — headless Chromium records animated HTML and ffmpeg encodes it (libx264). **Remotion is also wired as an optional per-frame enhancement** for data frames: users can turn on the native `frame-data-rollup` renderer for rolling numbers / growing bars, while the rest of the video remains on Hyperframes. Motion Canvas / Revideo and Manim remain roadmap items.
 
 ---
 
@@ -93,9 +93,9 @@ The same idea powers [Open Design](https://github.com/nexu-io/open-design) in th
 | **Coding agents (14)** | Open Design (Vela) · Windsurf CLI · Trae CLI · Claude Code · Cursor Agent · Codex CLI · Gemini CLI · Grok Build · Qwen Code · OpenCode · GitHub Copilot CLI · Aider · Hermes · Anthropic Messages API — auto-detected on your `PATH`, switchable from the top bar. |
 | **Real MP4 render** | Headless Chromium records the animated HTML and ffmpeg encodes it (libx264) — locally, no cloud render, no per-clip fee. |
 | **Article / repo → video** | Paste a URL or GitHub repo; the studio fetches it server-side (handles WeChat 公众号 articles) and builds the video from the real content. |
-| **21 templates** | Curated, license-clean patterns: data viz, product promos, social shorts, explainers, kinetic type, transitions — previewed live in the gallery. |
-| **Multi-frame storyboards** | A content-graph drives multi-scene videos; edit per-frame text inline, reorder, re-render. |
-| **AI soundtrack** | Optional background music + narration via MiniMax, mixed into the MP4 at export. |
+| **37 templates** | Curated, license-clean patterns: data viz, product promos, social shorts, explainers, kinetic type, transitions — previewed live in the gallery. |
+| **Multi-frame storyboards** | A content-graph drives multi-scene videos; edit per-frame text inline, enhance data frames with Remotion, re-render. |
+| **AI narration** | Optional generated narration, mixed into the MP4 at export. |
 | **Talking-head source** | Upload a speaker video, transcribe it with local Whisper, and export with the speaker overlaid bottom-right using the source audio. |
 | **Studio + CLI** | A local browser studio *and* a scriptable `html-video` CLI. |
 | **License** | Apache-2.0 — no per-render fees, no seat caps, no contributor agreements. |
@@ -126,12 +126,12 @@ One sentence (or one link) goes in; a real MP4 comes out. The pipeline is the sa
         │               cover the frame's own animation), → webm per frame
         ▼
   ⑥ ffmpeg              each webm → mp4 (libx264), then concat into one video;
-        │               optional AI soundtrack, or source-video audio + bottom-right overlay
+        │               optional AI narration, or source-video audio + bottom-right overlay
         ▼
       your.mp4
 ```
 
-Steps ②–④ are where the "meta-layer" lives: the agent decides the storyboard and the engine decides how to draw it, and neither leaks into the other. Step ⑤ is engine-specific — swapping in Remotion or Motion Canvas later replaces only that box, leaving the storyboard and the agent loop untouched. Everything runs on your machine; the only network calls are the optional source fetch and optional AI soundtrack.
+Steps ②–④ are where the "meta-layer" lives: the agent decides the storyboard and the engine decides how to draw it, and neither leaks into the other. Step ⑤ is engine-specific — today Hyperframes is the base renderer, and Remotion can be applied to selected data frames. Everything runs on your machine; the only network calls are the optional source fetch and optional narration generation.
 
 Single-frame videos take a fast path that skips the content-graph — one template, one HTML, straight to render.
 
@@ -180,7 +180,7 @@ pnpm -r build
 node packages/cli/dist/bin.js studio    # opens the studio at http://127.0.0.1:3071
 ```
 
-In the studio: pick a template (or just describe a video / paste a link / upload a talking-head clip), chat with your agent, edit per-frame text, choose source-video audio or AI soundtrack, and export MP4.
+In the studio: pick a template (or just describe a video / paste a link / upload a talking-head clip), chat with your agent, edit per-frame text, choose source-video audio or AI narration, and export MP4.
 
 CLI utilities:
 
@@ -221,20 +221,20 @@ Nothing installed? Set an Anthropic key and the studio talks to the Messages API
 html-video supports two audio/source modes:
 
 - **Talking-head source** — upload a speaker video in the **Talking-head source** panel, run local Whisper to extract timestamped subtitles, then ask the agent to generate the video from that transcript. On export, the speaker video is overlaid bottom-right and its original audio becomes the final audio track.
-- **AI soundtrack** — in **Settings → Audio**, add a MiniMax API key, then use the per-project **Soundtrack** panel.
+- **AI narration** — in **Settings → Audio**, add a narration provider key, then use the per-project **Soundtrack** panel.
 
-For AI soundtrack mode:
+For AI narration mode:
 
-- **Background music** — describe a mood (`calm cinematic ambient, slow build`); MiniMax generates an instrumental track.
-- **Narration** — type a script; MiniMax reads it (TTS).
+- **Narration** — type or draft a script; the configured TTS provider reads it and stores the audio as a project asset.
+- **Background music** — not enabled in the current build; exports currently mix narration or source-video audio.
 
-Music and narration are mixed into the exported MP4 (music ducked under the voice, optional fade-in/out) via ffmpeg. If talking-head mode is enabled, source-video audio takes precedence for that export; the saved AI soundtrack remains on the project for later use.
+Narration is mixed into the exported MP4 via ffmpeg. If talking-head mode is enabled and original-audio mode is selected, source-video audio takes precedence for that export; the saved narration remains on the project for later use.
 
 ---
 
 ## Template gallery
 
-The 21 templates aren't a random grab-bag — each one is a self-contained, agent-readable unit described by a `template.html-video.yaml` manifest the studio scans at startup. A manifest carries everything the agent needs to pick and drive the template without opening the HTML:
+The 37 templates aren't a random grab-bag — each one is a self-contained, agent-readable unit described by a `template.html-video.yaml` manifest the studio scans at startup. A manifest carries everything the agent needs to pick and drive the template without opening the HTML:
 
 - **What it's for** — `category`, `tags`, and a `best_for` list (e.g. *"Corporate slide"*, *"Minimal report card"*) that `search-templates` matches your intent against.
 - **What it outputs** — supported resolutions, aspect ratios, fps, duration bounds, whether it has an alpha channel or audio.
@@ -255,9 +255,10 @@ packages/
 │ runtime/               Agent runtime — detect / spawn / stream
 │                          (Open Design/Vela · Windsurf CLI · Trae CLI · Claude · Cursor · Codex · Gemini · Grok · Qwen · OpenCode · Copilot · Aider · Hermes · Anthropic API)
 ├── adapter-hyperframes/   Hyperframes engine adapter — real render via Chromium + ffmpeg
+├── adapter-remotion/      Remotion adapter — optional native data-frame enhancement
 ├── cli/                   `html-video` command + the studio HTTP server + source fetching
 └── project-studio/        Browser studio UI (chat, template gallery, frames, talking-head, soundtrack, export)
-templates/                 21 curated, license-clean video templates
+templates/                 37 curated, license-clean video templates
 research/                  RFCs (engine adapter / template metadata / agent skill / content-graph)
 ```
 
@@ -270,11 +271,12 @@ research/                  RFCs (engine adapter / template metadata / agent skil
 - [x] Multi-frame storyboard workflow (content-graph)
 - [x] Studio: live template gallery, agent switcher, per-frame text editing
 - [x] Source material: article / GitHub-repo → video
-- [x] AI soundtrack (MiniMax music + narration), mixed at export
+- [x] AI narration, mixed at export
 - [x] Talking-head video: local Whisper transcript + bottom-right overlay with source audio
 - [x] Real MP4 render — Hyperframes engine via headless Chromium + ffmpeg
 - [x] Agent model selection — Open Design (Vela) backend, live model catalog
-- [ ] Adapters for Remotion / Motion Canvas / Revideo
+- [x] Remotion adapter + native data-frame enhancement
+- [ ] Adapters for Motion Canvas / Revideo
 - [ ] Agent skill packages + a template marketplace
 
 ---
@@ -286,6 +288,7 @@ research/                  RFCs (engine adapter / template metadata / agent skil
 | [Open Design](https://github.com/nexu-io/open-design) | Sister project — the design-agent meta-layer; same team, shared philosophy |
 | [HTML Anything](https://github.com/nexu-io/html-anything) | Sister project — HTML for *static* deliverables; html-video is the *motion* side |
 | [Hyperframes](https://github.com/heygen-com/hyperframes) | The shipped engine adapter; the HTML+CSS+GSAP rendering paradigm and the source of several Apache-2.0 templates |
+| [Remotion](https://www.remotion.dev/) | Optional native data-frame renderer for rolling numbers / growing bars; check Remotion's license for larger commercial teams |
 
 ## License
 

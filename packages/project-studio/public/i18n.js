@@ -9,20 +9,28 @@
  * Locale resolution order:
  *   1. localStorage hv.studio.locale
  *   2. navigator.language prefix ("zh-CN" → "zh")
- *   3. DEFAULT_LOCALE = "en"
+ *   3. DEFAULT_LOCALE = "zh"
  *
  * Strings missing in the active locale fall back to en, then the key.
  */
 
-export const DEFAULT_LOCALE = 'en';
+export const DEFAULT_LOCALE = 'zh';
 export const AVAILABLE_LOCALES = ['en', 'zh'];
 
 const DICT = {
   en: {
+    'app.title': 'html-video · Studio',
     'app.empty_pick_create': 'Pick or create a project',
     'app.empty_subtitle':
       'Each project = one HTML video. Choose a template to see the visual baseline, chat with your agent to drive the content, edit per-frame text in the middle column, see the result on the right.',
     'app.no_project': 'no project',
+    'project.no_template': 'no template',
+    'project.template': 'template',
+    'project.status.draft': 'draft',
+    'project.status.previewed': 'previewed',
+    'project.status.rendered': 'rendered',
+    'project.status.exporting': 'exporting',
+    'project.status.error': 'error',
 
     'sidebar.projects': 'Projects',
     'sidebar.new': '+ New',
@@ -30,6 +38,7 @@ const DICT = {
     'sidebar.empty_list': 'no projects yet',
     'sidebar.menu.rename': '✎ Rename',
     'sidebar.menu.delete': '🗑 Delete',
+    'sidebar.menu.more': 'More actions',
     'sidebar.rename_prompt': 'New project name',
     'sidebar.delete_confirm': 'Delete "{name}"? This cannot be undone.',
 
@@ -44,7 +53,7 @@ const DICT = {
 
     'composer.placeholder.no_project': 'Pick a project first…',
     'composer.placeholder.detecting_agents': 'Describe the video while we check for agents…',
-    'composer.placeholder.no_agent': 'Install Claude Code (claude CLI) to enable chat…',
+    'composer.placeholder.no_agent': 'No runnable agent yet — open Settings to choose or configure one…',
     'composer.placeholder.local_transcript': 'Transcript is ready — confirm settings or generate the talking-head video…',
     'composer.placeholder.focus':
       'Edit only this frame (click ✕ on the chip above to release)…',
@@ -74,6 +83,13 @@ const DICT = {
     'chat.empty.title': 'Send a message to start',
     'chat.empty.body':
       'Tell the agent what you want — a single brand card, a multi-frame teaser, a data poster — and it will scaffold the HTML.',
+    'chat.empty.example_1': 'Warm-grain magazine outro: Open Design — design that evolves itself',
+    'chat.empty.example_2': 'Cyberpunk glitch title saying SYSTEM ONLINE, neon cyan/magenta',
+    'chat.empty.example_3': 'Swiss-grid data card: Templates 231, Skills 15, Systems 150, Craft 11',
+    'chat.no_agent.title': 'Choose an agent first',
+    'chat.no_agent.body':
+      'Chat generation needs a local CLI agent or a configured API key. Templates and existing previews still work; generation starts after an agent is ready.',
+    'chat.no_agent.action': 'Open agent settings',
     'chat.summary.form_submitted': '📋 Form submitted',
     'chat.summary.confirm_generate': '✓ Generate',
     'chat.summary.confirm_edit': '✏️ Edit',
@@ -83,6 +99,10 @@ const DICT = {
     'chat.placeholder.plan_graph': '🧭 *planning storyboard…*',
     'chat.empty_reply':
       '⚠️ The agent returned an empty reply. Try rephrasing your request — e.g. tell it the brand / topic / 1-2 concrete details, or which kind of frame you want first.',
+    'chat.template_auto_selected': '✓ Auto selected template: {name}',
+    'source.fetch_ok': '✓ Source loaded: {title}',
+    'source.fetch_ok_truncated': '✓ Source loaded: {title} (trimmed for prompt length)',
+    'source.fetch_failed': '⚠️ Could not read source {url}: {message}',
 
     'preview.placeholder.pick_project': 'Pick a project first.',
     'preview.placeholder.pick_template':
@@ -138,25 +158,27 @@ const DICT = {
     'export.reveal_failed': 'Open failed: {message}',
 
     'talking.title': '🎙 Talking-head source',
-    'talking.summary_sub': 'Upload a speaker video, transcribe locally, overlay it on export',
+    'talking.summary_sub': 'Upload a speaker video, GIF, or image; overlay it on export',
     'talking.badge': 'source',
-    'talking.source_label': 'Speaker video',
-    'talking.hint': 'Uses local Whisper only to read the script. Export keeps the video picture and lets you choose original audio or synthesized cloned narration.',
+    'talking.source_label': 'Speaker source',
+    'talking.hint': 'Videos can be transcribed locally. Videos, GIFs, and images are exported as the same bottom-right talking-head overlay.',
     'talking.audio_mode': 'Export audio',
     'talking.audio_synthetic': 'Cloned / synthesized audio',
     'talking.audio_original': 'Original video audio',
     'talking.audio_saved': '✓ Audio choice saved',
-    'talking.upload': 'Upload video',
+    'talking.upload': 'Upload video / GIF / image',
     'talking.transcribe': 'Transcribe subtitles',
     'talking.clear': 'Disable',
-    'talking.empty': 'No talking-head video selected.',
-    'talking.uploading': '⏵ Uploading video…',
-    'talking.uploaded': '✓ Talking-head video enabled',
+    'talking.empty': 'No talking-head source selected.',
+    'talking.uploading': '⏵ Uploading source…',
+    'talking.uploaded': '✓ Talking-head source enabled',
     'talking.upload_failed': 'Upload failed',
     'talking.transcribing': '⏵ Running local Whisper…',
     'talking.transcribed': '✓ Transcript ready — use it as source material in chat',
     'talking.transcript_ready': 'Transcript ready',
     'talking.transcript_missing': 'Transcript not generated yet',
+    'talking.image_overlay_only': 'Overlay only — GIF/image has no transcript',
+    'talking.source_fallback': 'talking-head source',
     'talking.prompt_after_transcribe': 'Use the uploaded talking-head transcript to generate a multi-frame video. Keep the speaker video as a bottom-right overlay on export.',
     'talking.cleared': 'Talking-head mode disabled',
     'talking.failed': '⚠️ Talking-head failed: {message}',
@@ -231,6 +253,7 @@ const DICT = {
 
     'gallery.title': 'Pick a template',
     'gallery.close': '✕',
+    'gallery.preview': 'Preview',
 
     'modal.new.title': 'New project',
     'modal.new.name_label': 'Name',
@@ -246,6 +269,7 @@ const DICT = {
     'language.label': 'Language',
 
     'settings.title': 'Settings',
+    'settings.close': 'Close settings',
     'settings.tab.agent': 'Agent',
     'settings.tab.audio': 'Audio',
     'settings.tab.language': 'Language',
@@ -326,6 +350,7 @@ const DICT = {
     'settings.agent.byok.env_key': 'ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN',
     'settings.agent.byok.env_base': 'ANTHROPIC_BASE_URL (optional, defaults to api.anthropic.com)',
     'settings.agent.rescan': '↻ Rescan',
+    'settings.agent.install': 'Install ↗',
     'settings.agent.rescanned': 'Rescanned',
 
     'settings.language.title': 'Language',
@@ -347,14 +372,42 @@ const DICT = {
 
     'tpl_preview.cancel': 'Cancel',
     'tpl_preview.use': 'Use this template',
-    'tpl_preview.replace_confirm': 'Replace current template with "{name}"? Existing preview content stays put — the agent can rebuild on next chat.',
+    'tpl_preview.replace_confirm': 'Replace current template with "{name}"? You can only switch the template, or adapt the current video content to the new template structure.',
     'tpl_preview.applied': 'Template: {name}',
     'tpl_preview.confirm_yes': 'Replace',
+    'tpl_preview.confirm_restyle': 'Replace & adapt frames',
     'tpl_preview.confirm_no': 'No, keep current',
+    'tpl_preview.restyle_prompt': 'Use the current script and video content, then regenerate all frames to fit the selected template structure: {name}',
     'tpl_preview.fps_dur': '{fps}fps · {duration}s · {aspect}',
     'tpl_preview.source_skill': 'Adapted from',
     'tpl_preview.source_origin': 'Design lineage',
     'tpl_preview.source_license': 'License',
+    'tpl_preview.samples': 'Built-in sample frames',
+    'tpl_preview.samples_hint': 'Static key frames only — no animation or video playback.',
+    'tpl_preview.elements': 'Content elements',
+    'tpl_preview.motion': 'Motion language',
+    'tpl_preview.element.title': 'Title / hero',
+    'tpl_preview.element.body': 'Body copy',
+    'tpl_preview.element.list': 'Lists / steps',
+    'tpl_preview.element.quote': 'Quote',
+    'tpl_preview.element.metrics': 'Metrics / KPI',
+    'tpl_preview.element.chart': 'Charts / data',
+    'tpl_preview.element.timeline': 'Timeline / process',
+    'tpl_preview.element.diagram': 'Diagram / network',
+    'tpl_preview.element.code': 'Code / terminal',
+    'tpl_preview.element.media': 'Image / product',
+    'tpl_preview.element.brand': 'Brand / outro',
+    'tpl_preview.motion.fade': 'Fade / reveal',
+    'tpl_preview.motion.slide': 'Slide / sweep',
+    'tpl_preview.motion.scale': 'Scale / pop',
+    'tpl_preview.motion.stagger': 'Staggered entrance',
+    'tpl_preview.motion.line-draw': 'Line drawing',
+    'tpl_preview.motion.data-growth': 'Counter / data growth',
+    'tpl_preview.motion.timeline': 'Timeline choreography',
+    'tpl_preview.frame.overview': 'Overview',
+    'tpl_preview.frame.opening': 'Opening state',
+    'tpl_preview.frame.main': 'Main state',
+    'tpl_preview.frame.final': 'Final state',
 
     // One-click narrate-to-video orchestration
     'narrate.title': '🎬 Narrated storyboard',
@@ -365,7 +418,8 @@ const DICT = {
     'narrate.topic_placeholder': 'e.g. Introduce our open-source project html-video',
     'narrate.voice_label': 'Voice',
     'narrate.template_label': 'Template',
-    'narrate.template_none': 'No template (agent decides style)',
+    'narrate.template_none': 'Auto select template',
+    'narrate.template_auto_selected': '✓ Auto selected template: {name}',
     'narrate.aspect_label': 'Aspect',
     'narrate.start': '🎬 Generate storyboard',
     'narrate.cancel': 'Cancel',
@@ -384,10 +438,18 @@ const DICT = {
   },
 
   zh: {
+    'app.title': 'html-video · 视频工作台',
     'app.empty_pick_create': '挑一个项目或新建',
     'app.empty_subtitle':
       '每个项目 = 一个 HTML 视频。挑一个模板看视觉基线、跟 agent 聊驱动内容、在中间栏改逐帧文字、右边看效果。',
     'app.no_project': '未选项目',
+    'project.no_template': '未选择模板',
+    'project.template': '模板',
+    'project.status.draft': '草稿',
+    'project.status.previewed': '已预览',
+    'project.status.rendered': '已导出',
+    'project.status.exporting': '导出中',
+    'project.status.error': '异常',
 
     'sidebar.projects': '项目',
     'sidebar.new': '+ 新建',
@@ -395,6 +457,7 @@ const DICT = {
     'sidebar.empty_list': '还没有项目',
     'sidebar.menu.rename': '✎ 重命名',
     'sidebar.menu.delete': '🗑 删除',
+    'sidebar.menu.more': '更多操作',
     'sidebar.rename_prompt': '新项目名',
     'sidebar.delete_confirm': '删除 "{name}"？此操作不可撤销。',
 
@@ -409,7 +472,7 @@ const DICT = {
 
     'composer.placeholder.no_project': '先选一个项目…',
     'composer.placeholder.detecting_agents': '描述视频（正在探测 agent）…',
-    'composer.placeholder.no_agent': '装 claude CLI 后即可聊天…',
+    'composer.placeholder.no_agent': '还没有可运行的 agent，打开设置选择或配置一个…',
     'composer.placeholder.local_transcript': '字幕已就绪，可确认设置并生成口播视频…',
     'composer.placeholder.focus': '只修改这一帧的内容（点掉上方芯片可恢复整片）…',
     'composer.placeholder.link': '粘贴文章链接、GitHub repo 或资料链接，用它生成视频…',
@@ -437,6 +500,13 @@ const DICT = {
     'chat.empty.title': '发条消息开始',
     'chat.empty.body':
       '告诉 agent 想做什么 — 单帧标题卡、多帧预告片、数据大字报 — 它会搭出 HTML。',
+    'chat.empty.example_1': '暖颗粒杂志风片尾：Open Design，让设计持续进化',
+    'chat.empty.example_2': '赛博朋克故障标题：系统已上线，青色与品红霓虹',
+    'chat.empty.example_3': '瑞士网格数据卡：模板 231、技能 15、系统 150、作品 11',
+    'chat.no_agent.title': '先选择一个 agent',
+    'chat.no_agent.body':
+      '生成需要本地 CLI agent，或配置 API key。模板和已有预览仍可查看；agent 就绪后才能开始生成。',
+    'chat.no_agent.action': '打开 agent 设置',
     'chat.summary.form_submitted': '📋 提交了表单',
     'chat.summary.confirm_generate': '✓ 确认生成',
     'chat.summary.confirm_edit': '✏️ 改一下',
@@ -446,6 +516,10 @@ const DICT = {
     'chat.placeholder.plan_graph': '🧭 *规划故事板…*',
     'chat.empty_reply':
       '⚠️ Agent 返回为空。试着重新表述 — 比如告诉它品牌 / 主题 / 1-2 个具体点，或者你想要什么类型的帧。',
+    'chat.template_auto_selected': '✓ 已自动选择模板：{name}',
+    'source.fetch_ok': '✓ 已读取来源：{title}',
+    'source.fetch_ok_truncated': '✓ 已读取来源：{title}（已按 prompt 长度截断）',
+    'source.fetch_failed': '⚠️ 无法读取来源 {url}：{message}',
 
     'preview.placeholder.pick_project': '先选一个项目。',
     'preview.placeholder.pick_template':
@@ -499,26 +573,28 @@ const DICT = {
     'export.copy_failed': '复制失败：{message}',
     'export.reveal_failed': '打开失败：{message}',
 
-    'talking.title': '🎙 口播视频源',
-    'talking.summary_sub': '上传人像口播，本地转字幕，导出时右下角叠加',
+    'talking.title': '🎙 口播素材源',
+    'talking.summary_sub': '上传口播视频、GIF 动图或图片，导出时右下角叠加',
     'talking.badge': '素材源',
-    'talking.source_label': '口播视频',
-    'talking.hint': '只用本地 Whisper 读取口播内容；导出保留视频画面，音频可选择原音或复刻合成旁白。',
+    'talking.source_label': '口播素材',
+    'talking.hint': '视频可用本地 Whisper 读取字幕；视频、GIF 动图和图片都会在导出时作为右下角口播画中画叠加。',
     'talking.audio_mode': '导出音频',
     'talking.audio_synthetic': '复刻 / 合成音频',
     'talking.audio_original': '原始视频音频',
     'talking.audio_saved': '✓ 音频选择已保存',
-    'talking.upload': '上传视频',
+    'talking.upload': '上传视频 / 动图 / 图片',
     'talking.transcribe': '提取字幕',
     'talking.clear': '停用',
-    'talking.empty': '还没有选择口播视频。',
-    'talking.uploading': '⏵ 正在上传视频…',
-    'talking.uploaded': '✓ 已启用口播视频',
+    'talking.empty': '还没有选择口播素材。',
+    'talking.uploading': '⏵ 正在上传素材…',
+    'talking.uploaded': '✓ 已启用口播素材',
     'talking.upload_failed': '上传失败',
     'talking.transcribing': '⏵ 正在运行本地 Whisper…',
     'talking.transcribed': '✓ 字幕已生成，可以作为生成素材使用',
     'talking.transcript_ready': '字幕已生成',
     'talking.transcript_missing': '还未生成字幕',
+    'talking.image_overlay_only': '仅叠加画面，动图/图片不提取字幕',
+    'talking.source_fallback': '口播素材',
     'talking.prompt_after_transcribe': '基于上传口播视频识别出的字幕，生成一个多帧视频。导出时保留口播视频作为右下角画中画。',
     'talking.cleared': '已停用口播模式',
     'talking.failed': '⚠️ 口播处理失败：{message}',
@@ -593,6 +669,7 @@ const DICT = {
 
     'gallery.title': '挑一个模板',
     'gallery.close': '✕',
+    'gallery.preview': '预览',
 
     'modal.new.title': '新建项目',
     'modal.new.name_label': '名称',
@@ -608,6 +685,7 @@ const DICT = {
     'language.label': '语言',
 
     'settings.title': '设置',
+    'settings.close': '关闭设置',
     'settings.tab.agent': 'Agent',
     'settings.tab.audio': '音频',
     'settings.tab.language': '界面语言',
@@ -688,6 +766,7 @@ const DICT = {
     'settings.agent.byok.env_key': 'ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN',
     'settings.agent.byok.env_base': 'ANTHROPIC_BASE_URL（可选，默认 api.anthropic.com）',
     'settings.agent.rescan': '↻ 重新扫描',
+    'settings.agent.install': '安装 ↗',
     'settings.agent.rescanned': '已重新扫描',
 
     'settings.language.title': '界面语言',
@@ -709,14 +788,42 @@ const DICT = {
 
     'tpl_preview.cancel': '取消',
     'tpl_preview.use': '使用此模板',
-    'tpl_preview.replace_confirm': '把当前模板替换为 "{name}"？现有预览不会被覆盖，下一轮 chat 时 agent 会按新模板重写。',
+    'tpl_preview.replace_confirm': '把当前模板替换为 "{name}"？可以只切换模板，也可以根据当前视频内容按新模板结构重新生成全部帧。',
     'tpl_preview.applied': '已切换模板：{name}',
     'tpl_preview.confirm_yes': '确认替换',
+    'tpl_preview.confirm_restyle': '替换并适配全部帧',
     'tpl_preview.confirm_no': '不换，保留当前',
+    'tpl_preview.restyle_prompt': '根据当前脚本和视频内容，按已选择模板的结构重新生成全部帧：{name}',
     'tpl_preview.fps_dur': '{fps}fps · {duration}秒 · {aspect}',
     'tpl_preview.source_skill': '改编自',
     'tpl_preview.source_origin': '设计渊源',
     'tpl_preview.source_license': '许可证',
+    'tpl_preview.samples': '内置样例帧',
+    'tpl_preview.samples_hint': '仅展示静态关键帧，不播放动画或视频。',
+    'tpl_preview.elements': '内容元素',
+    'tpl_preview.motion': '动效语言',
+    'tpl_preview.element.title': '标题 / 主视觉',
+    'tpl_preview.element.body': '正文说明',
+    'tpl_preview.element.list': '列表 / 步骤',
+    'tpl_preview.element.quote': '引语 / 金句',
+    'tpl_preview.element.metrics': '指标 / KPI',
+    'tpl_preview.element.chart': '图表 / 数据',
+    'tpl_preview.element.timeline': '时间线 / 流程',
+    'tpl_preview.element.diagram': '图解 / 网络',
+    'tpl_preview.element.code': '代码 / 终端',
+    'tpl_preview.element.media': '图片 / 产品',
+    'tpl_preview.element.brand': '品牌 / 片尾',
+    'tpl_preview.motion.fade': '淡入 / 显现',
+    'tpl_preview.motion.slide': '滑入 / 扫动',
+    'tpl_preview.motion.scale': '缩放 / 弹出',
+    'tpl_preview.motion.stagger': '分层依次入场',
+    'tpl_preview.motion.line-draw': '线条绘制',
+    'tpl_preview.motion.data-growth': '数字 / 数据生长',
+    'tpl_preview.motion.timeline': '时间轴编排',
+    'tpl_preview.frame.overview': '整体样式',
+    'tpl_preview.frame.opening': '开场状态',
+    'tpl_preview.frame.main': '主体状态',
+    'tpl_preview.frame.final': '收尾状态',
 
     // 一键口播出片
     'narrate.title': '🎬 口播生成视频页',
@@ -727,7 +834,8 @@ const DICT = {
     'narrate.topic_placeholder': '如：介绍我们的开源项目 html-video',
     'narrate.voice_label': '音色',
     'narrate.template_label': '模板',
-    'narrate.template_none': '不选模板（agent 自由发挥）',
+    'narrate.template_none': '自动选择模板',
+    'narrate.template_auto_selected': '✓ 已自动选择模板：{name}',
     'narrate.aspect_label': '画面尺寸',
     'narrate.start': '🎬 开始生成口播页',
     'narrate.cancel': '取消',
@@ -747,16 +855,19 @@ const DICT = {
 };
 
 const STORAGE_KEY = 'hv.studio.locale';
+const EXPLICIT_STORAGE_KEY = 'hv.studio.locale.explicit';
 let _locale = resolveInitialLocale();
 
 function resolveInitialLocale() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && AVAILABLE_LOCALES.includes(stored)) return stored;
+    const explicitlyChosen = localStorage.getItem(EXPLICIT_STORAGE_KEY) === '1';
+    if (explicitlyChosen && stored && AVAILABLE_LOCALES.includes(stored)) return stored;
   } catch {
     /* localStorage unavailable */
   }
-  // Default is English regardless of nav.language. Joey explicitly asked.
+  // Chinese is the product default. A language explicitly selected in
+  // Settings still wins on future visits.
   return DEFAULT_LOCALE;
 }
 
@@ -767,7 +878,10 @@ export function getLocale() {
 export function setLocale(loc) {
   if (!AVAILABLE_LOCALES.includes(loc)) return;
   _locale = loc;
-  try { localStorage.setItem(STORAGE_KEY, loc); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, loc);
+    localStorage.setItem(EXPLICIT_STORAGE_KEY, '1');
+  } catch {}
   // Notify listeners (the studio app re-renders).
   document.dispatchEvent(new CustomEvent('hv-locale-change', { detail: { locale: loc } }));
 }
@@ -782,6 +896,8 @@ export function setLocale(loc) {
  */
 export function applyDomI18n(root) {
   const r = root || document;
+  document.documentElement.lang = _locale === 'zh' ? 'zh-CN' : 'en';
+  document.title = t('app.title');
   r.querySelectorAll('[data-i18n]').forEach((el) => {
     el.textContent = t(el.dataset.i18n);
   });
@@ -809,7 +925,7 @@ export function t(key, params) {
   let s = dict[key];
   if (s === undefined) {
     // Fall back to English, then to the key itself.
-    s = DICT[DEFAULT_LOCALE][key] ?? key;
+    s = DICT.en[key] ?? key;
   }
   if (params) {
     for (const [k, v] of Object.entries(params)) {

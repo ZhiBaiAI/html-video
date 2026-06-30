@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-data-rollup
 name: Data Rollup
+name_zh: "数据滚动"
+description_zh: "Remotion 原生数字滚动和柱形动画，适合 KPI 数据帧。"
 description: >
   A native Remotion data-animation frame: bars grow from zero by real data via
   spring physics while the figures roll up from 0 to their target in sync. The
@@ -42,6 +44,7 @@ output:
     type: variable
     min_sec: 3
     max_sec: 8
+    default_sec: 6
   alpha: true
   audio:
     supported: false

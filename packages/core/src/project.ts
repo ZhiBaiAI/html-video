@@ -157,8 +157,8 @@ export class ProjectOrchestrator {
   ): Promise<Project> {
     const project = await this.deps.projects.load(projectId);
     const asset = project.assets.find((a) => a.id === videoAssetId);
-    if (!asset || asset.type !== 'video') {
-      throw new HtmlVideoError('invalid-input', `Video asset ${videoAssetId} not found`);
+    if (!asset || (asset.type !== 'video' && asset.type !== 'image')) {
+      throw new HtmlVideoError('invalid-input', `Talking-head video/image asset ${videoAssetId} not found`);
     }
     project.talkingHead = {
       enabled: opts.enabled ?? true,
@@ -166,7 +166,9 @@ export class ProjectOrchestrator {
       ...(opts.transcriptAssetId !== undefined && { transcriptAssetId: opts.transcriptAssetId }),
       ...(opts.srtAssetId !== undefined && { srtAssetId: opts.srtAssetId }),
       ...(opts.vttAssetId !== undefined && { vttAssetId: opts.vttAssetId }),
-      audioMode: opts.audioMode ?? project.talkingHead?.audioMode ?? 'synthetic',
+      audioMode: asset.type === 'video'
+        ? (opts.audioMode ?? project.talkingHead?.audioMode ?? 'synthetic')
+        : 'synthetic',
       overlay: {
         position: 'bottom-right',
         widthPct: opts.widthPct ?? project.talkingHead?.overlay.widthPct ?? 15,
@@ -210,7 +212,7 @@ export class ProjectOrchestrator {
   }> {
     let project = await this.setTalkingHead(args.projectId, args.videoAssetId);
     const video = project.assets.find((a) => a.id === args.videoAssetId);
-    if (!video?.path) {
+    if (!video?.path || video.type !== 'video') {
       throw new HtmlVideoError('asset-not-found', `Video asset ${args.videoAssetId} has no file path`);
     }
     const projectDir = await this.deps.projects.ensureDir(args.projectId);
@@ -552,7 +554,7 @@ export class ProjectOrchestrator {
       const totalDur = ordered.reduce((s, f) => s + (f.durationSec || 0), 0);
       if (project.talkingHead?.enabled) {
         await this.applyTalkingHead(project, outputPath, args.onProgress);
-        if (resolveTalkingHeadAudioMode(project.talkingHead.audioMode) === 'original') {
+        if (shouldUseTalkingHeadOriginalAudio(project)) {
           await this.applyTalkingHeadOriginalAudio(project, outputPath, args.onProgress);
         } else {
           await this.applySoundtrack(project, outputPath, totalDur, args.onProgress);
@@ -594,7 +596,7 @@ export class ProjectOrchestrator {
     );
     if (project.talkingHead?.enabled) {
       await this.applyTalkingHead(project, outputPath, args.onProgress);
-      if (resolveTalkingHeadAudioMode(project.talkingHead.audioMode) === 'original') {
+      if (shouldUseTalkingHeadOriginalAudio(project)) {
         await this.applyTalkingHeadOriginalAudio(project, outputPath, args.onProgress);
       } else {
         await this.applySoundtrack(project, outputPath, undefined, args.onProgress);
@@ -818,14 +820,14 @@ export class ProjectOrchestrator {
   ): Promise<void> {
     const th = project.talkingHead;
     if (!th?.enabled) return;
-    const videoPath = project.assets.find((a) => a.id === th.videoAssetId)?.path;
-    if (!videoPath) return;
+    const sourceAsset = talkingHeadSourceAsset(project);
+    if (!sourceAsset?.path || sourceAsset.type !== 'video') return;
     onProgress?.(99, 'using original talking-head audio');
     const { rename } = await import('node:fs/promises');
     const tmpOut = `${outputPath}.source-audio.mp4`;
     await muxOriginalAudioWithFfmpeg({
       videoPath: outputPath,
-      audioSourcePath: videoPath,
+      audioSourcePath: sourceAsset.path,
       outputPath: tmpOut,
     });
     await rename(tmpOut, outputPath);
@@ -838,11 +840,11 @@ export class ProjectOrchestrator {
   ): Promise<void> {
     const th = project.talkingHead;
     if (!th?.enabled) return;
-    const videoPath = project.assets.find((a) => a.id === th.videoAssetId)?.path;
-    if (!videoPath) {
-      throw new HtmlVideoError('asset-not-found', `Talking-head video asset ${th.videoAssetId} has no file path`);
+    const sourceAsset = talkingHeadSourceAsset(project);
+    if (!sourceAsset?.path) {
+      throw new HtmlVideoError('asset-not-found', `Talking-head video/image asset ${th.videoAssetId} has no file path`);
     }
-    onProgress?.(99, 'overlaying talking-head video');
+    onProgress?.(99, 'overlaying talking-head source');
     const { readFile, rename, writeFile } = await import('node:fs/promises');
     const tmpOut = `${outputPath}.talking-head.mp4`;
     const outputWidth = project.preferences.resolution?.width ?? 1920;
@@ -869,12 +871,14 @@ export class ProjectOrchestrator {
     }
     await overlayTalkingHeadWithFfmpeg({
       baseVideoPath: outputPath,
-      talkingHeadPath: videoPath,
+      talkingHeadPath: sourceAsset.path,
       outputPath: tmpOut,
       outputWidth,
       widthPct: overlayWidthPct,
       marginPx: overlayMarginPx,
       shape: th.overlay.shape ?? 'circle',
+      sourceType: sourceAsset.type === 'image' ? 'image' : 'video',
+      sourceMimeType: sourceAsset.metadata.mimeType,
       ...(subtitlesPath !== undefined && { subtitlesPath }),
     });
     await rename(tmpOut, outputPath);
@@ -1088,6 +1092,16 @@ function resolveTalkingHeadAudioMode(mode: ProjectTalkingHeadAudioMode | undefin
   return mode === 'original' ? 'original' : 'synthetic';
 }
 
+function talkingHeadSourceAsset(project: Project): Asset | undefined {
+  const id = project.talkingHead?.videoAssetId;
+  return id ? project.assets.find((a) => a.id === id) : undefined;
+}
+
+function shouldUseTalkingHeadOriginalAudio(project: Project): boolean {
+  return resolveTalkingHeadAudioMode(project.talkingHead?.audioMode) === 'original'
+    && talkingHeadSourceAsset(project)?.type === 'video';
+}
+
 async function overlayTalkingHeadWithFfmpeg(args: {
   baseVideoPath: string;
   talkingHeadPath: string;
@@ -1096,13 +1110,15 @@ async function overlayTalkingHeadWithFfmpeg(args: {
   widthPct: number;
   marginPx: number;
   shape: 'circle' | 'rounded-rect';
+  sourceType: 'video' | 'image';
+  sourceMimeType?: string;
   subtitlesPath?: string;
 }): Promise<void> {
+  const sourceInputArgs = talkingHeadSourceInputArgs(args);
   const runOverlay = (subtitlesPath?: string, label = 'talking-head overlay') => runFfmpeg([
     '-y',
     '-i', args.baseVideoPath,
-    '-stream_loop', '-1',
-    '-i', args.talkingHeadPath,
+    ...sourceInputArgs,
     '-filter_complex', buildTalkingHeadOverlayFilter({ ...args, subtitlesPath }),
     '-map', '[vout]',
     '-c:v', 'libx264',
@@ -1120,6 +1136,18 @@ async function overlayTalkingHeadWithFfmpeg(args: {
   }
 }
 
+function talkingHeadSourceInputArgs(args: {
+  talkingHeadPath: string;
+  sourceType: 'video' | 'image';
+  sourceMimeType?: string;
+}): string[] {
+  if (args.sourceType !== 'image') return ['-stream_loop', '-1', '-i', args.talkingHeadPath];
+  const isAnimated = args.sourceMimeType === 'image/gif' || /\.gif$/i.test(args.talkingHeadPath);
+  return isAnimated
+    ? ['-stream_loop', '-1', '-i', args.talkingHeadPath]
+    : ['-loop', '1', '-i', args.talkingHeadPath];
+}
+
 function buildTalkingHeadOverlayFilter(args: {
   outputWidth: number;
   widthPct: number;
@@ -1128,6 +1156,7 @@ function buildTalkingHeadOverlayFilter(args: {
   subtitlesPath?: string;
 }): string {
   const overlayWidth = Math.max(150, Math.round(args.outputWidth * (args.widthPct / 100)));
+  const contentWidth = Math.max(120, Math.round(overlayWidth * 0.86));
   const margin = Math.max(0, Math.round(args.marginPx));
   const baseLabel = args.subtitlesPath ? 'baseSub' : '0:v';
   const subtitleFilter = args.subtitlesPath
@@ -1135,14 +1164,14 @@ function buildTalkingHeadOverlayFilter(args: {
     : '';
   const overlayFilter = args.shape === 'circle'
     ? [
-        `[1:v]scale=${overlayWidth}:${overlayWidth}:force_original_aspect_ratio=increase,crop=${overlayWidth}:${overlayWidth},setsar=1,format=rgb24[th0]`,
+        `[1:v]scale=${contentWidth}:${contentWidth}:force_original_aspect_ratio=decrease,pad=${overlayWidth}:${overlayWidth}:(ow-iw)/2:(oh-ih)/2:color=0xE5EEF4,setsar=1,format=rgb24[th0]`,
         `nullsrc=s=${overlayWidth}x${overlayWidth},format=gray,geq=lum='if(lte((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2),(W/2)*(W/2)),255,0)'[mask]`,
         `[th0][mask]alphamerge[th]`,
-        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:eof_action=pass[vout]`,
+        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:shortest=1:eof_action=pass[vout]`,
       ].join(';')
     : [
         `[1:v]scale=${overlayWidth}:-2,format=rgba[th]`,
-        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:eof_action=pass[vout]`,
+        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:shortest=1:eof_action=pass[vout]`,
       ].join(';');
   return `${subtitleFilter}${overlayFilter}`;
 }

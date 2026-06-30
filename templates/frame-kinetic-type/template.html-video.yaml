@@ -1,6 +1,8 @@
 spec_version: 1
 id: frame-kinetic-type
 name: Kinetic Type
+name_zh: "动态文字"
+description_zh: "文字驱动的动效标题，适合短促有力的开场。"
 description: >
   Bold kinetic typography promo
 
@@ -32,7 +34,7 @@ output:
     max_sec: 30
     default_sec: 15
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:
