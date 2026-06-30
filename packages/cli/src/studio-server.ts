@@ -21,6 +21,12 @@ import {
 } from '@html-video/core';
 import { extractUrls, fetchSource } from './fetch-source.js';
 import { detectAll, findAgent, spawnAgent } from '@html-video/runtime';
+import {
+  allocateNarrationDurations,
+  applyFrameMotionTiming,
+  estimateNarrationSeconds,
+  renderFrameMotionTimingPrompt,
+} from './narration-timing.js';
 
 interface StudioHandle {
   url: string;
@@ -988,6 +994,49 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           }
           const fullNarrationText = script.trim();
 
+          // Synthesize and measure the narration BEFORE drawing frames. The
+          // previous order generated HTML at a guessed 3s/frame and changed
+          // only graph durations afterwards, leaving CSS/GSAP motion authored
+          // against stale timing. Real audio duration now drives both graph
+          // nodes and the animation prompt from the first render.
+          progress('audio', 'narrate.progress.audio');
+          const narration = ctx.mediaConfig.resolveNarration();
+          if (!narration) {
+            throw new Error('Narration API key not configured — add it in Settings > Audio.');
+          }
+          const nar = narration.provider === 'bailian'
+            ? await generateBailianTts({
+                text: fullNarrationText,
+                ...(body.voiceId !== undefined && { voiceId: body.voiceId }),
+                model: body.voiceId
+                  ? (ctx.mediaConfig.getClonedVoice(body.voiceId)?.model ?? narration.model)
+                  : narration.model,
+                creds: narration.creds,
+              })
+            : await generateTts({
+                text: fullNarrationText,
+                ...(body.voiceId !== undefined && { voiceId: body.voiceId }),
+                creds: narration.creds,
+              });
+          const { asset: narAsset } = await ctx.orchestrator.addBufferAsset(
+            projectId,
+            nar.bytes,
+            nar.ext,
+            `narration · ${fullNarrationText.slice(0, 60)}`,
+          );
+          const probedAudioDuration = narAsset.path ? await probeMediaDurationSec(narAsset.path) : NaN;
+          const hasMeasuredAudio = Number.isFinite(probedAudioDuration) && probedAudioDuration > 0;
+          const effectiveAudioDuration = hasMeasuredAudio
+            ? probedAudioDuration
+            : segments.reduce((sum, segment) => sum + estimateNarrationSeconds(segment), 0);
+          const frameDurationsSec = allocateNarrationDurations(segments, effectiveAudioDuration);
+          progress('fit', 'narrate.progress.fit');
+          sse({
+            type: 'narrate_audio_done',
+            asset_id: narAsset.id,
+            duration_sec: hasMeasuredAudio ? probedAudioDuration : null,
+          });
+
           // ---- Steps 2-3: understand the script, plan the storyboard, and
           // design every frame with the selected template's visual language.
           // The old path immediately ran localTemplateFrameHtml() for selected
@@ -1016,7 +1065,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               collected: {
                 aspect,
                 frame_count: String(segments.length),
-                per_frame: '3',
+                per_frame: String(frameDurationsSec.reduce((sum, value) => sum + value, 0) / frameDurationsSec.length),
               },
               pickedType: '口播脚本视频',
               pickedStyle: selectedNarrateTemplate ? '从设计模板选择' : '内容驱动的专业视频设计',
@@ -1028,6 +1077,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             },
             attachments: [],
             fallbackFrameTexts: segments,
+            frameDurationsSec,
             openingTopic: fullNarrationText.slice(0, 160),
             restyleOnly: false,
             failOnAgentError: true,
@@ -1049,35 +1099,9 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           const graph = await ctx.orchestrator.readContentGraph(projectId);
           if (!graph || graph.nodes.length === 0) {
             throw new Error('Storyboard generation produced no frames.');
-
           }
 
-          // ---- Step 4: synthesize the narration TTS ----
-          progress('audio', 'narrate.progress.audio');
-          const narration = ctx.mediaConfig.resolveNarration();
-          if (!narration) {
-            throw new Error('Narration API key not configured — add it in Settings > Audio.');
-          }
-          const nar = narration.provider === 'bailian'
-            ? await generateBailianTts({
-                text: fullNarrationText,
-                ...(body.voiceId !== undefined && { voiceId: body.voiceId }),
-                model: body.voiceId
-                  ? (ctx.mediaConfig.getClonedVoice(body.voiceId)?.model ?? narration.model)
-                  : narration.model,
-                creds: narration.creds,
-              })
-            : await generateTts({
-                text: fullNarrationText,
-                ...(body.voiceId !== undefined && { voiceId: body.voiceId }),
-                creds: narration.creds,
-              });
-          const { asset: narAsset } = await ctx.orchestrator.addBufferAsset(
-            projectId,
-            nar.bytes,
-            nar.ext,
-            `narration · ${fullNarrationText.slice(0, 60)}`,
-          );
+          // Bind the already-generated audio to the final graph node ids.
           const narrationByFrame = Object.fromEntries(graph.nodes.map((n, i) => [n.id, segments[i] ?? '']));
           const fresh = await ctx.orchestrator.load(projectId);
           fresh.soundtrack = {
@@ -1088,41 +1112,16 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             ...(body.volumeDb !== undefined && { narrationVolumeDb: body.volumeDb }),
           };
           await ctx.projects.save(fresh);
-          sse({ type: 'narrate_audio_done', asset_id: narAsset.id });
 
-          // ---- Step 5: fit frame durations to the REAL audio length ----
-          progress('fit', 'narrate.progress.fit');
-          const totalChars = segments.reduce((s, seg2) => s + seg2.trim().length, 0);
-          const audioDur = narAsset.path ? await probeMediaDurationSec(narAsset.path) : NaN;
-          let fitSource: 'audio' | 'estimate' = 'estimate';
-          const updatedGraph = await ctx.orchestrator.readContentGraph(projectId);
-          if (updatedGraph && Number.isFinite(audioDur) && audioDur > 0 && totalChars > 0) {
-            fitSource = 'audio';
-            const MIN = 2;
-            // Each frame's share of the real audio length, by char count.
-            const durs = updatedGraph.nodes.map((n) => {
-              const seg2 = narrationByFrame[n.id] ?? '';
-              const d = Math.max(MIN, Math.round((seg2.trim().length / totalChars) * audioDur));
-              return { n, d };
-            });
-            const sum = durs.reduce((s, x) => s + x.d, 0);
-            if (sum !== Math.round(audioDur) && durs.length) {
-              const longest = durs.reduce((a, b) => (b.d > a.d ? b : a));
-              longest.d = Math.max(MIN, longest.d + (Math.round(audioDur) - sum));
-            }
-            for (const { n, d } of durs) n.durationSec = d;
-            await ctx.orchestrator.writeContentGraph(projectId, updatedGraph, { preserveFrames: true });
-          }
-
-          // ---- Step 6: stop at an editable rendered project ----
+          // ---- Step 5: stop at an editable rendered project ----
           // The user may still change text/templates/frames after this point.
           // Final MP4 export is intentionally handled by the normal Export MP4 button.
           const renderedProj = await ctx.orchestrator.load(projectId);
           sse({
             type: 'narrate_ready',
             project: renderedProj,
-            audio_duration_sec: Number.isFinite(audioDur) ? audioDur : null,
-            fit_source: fitSource,
+            audio_duration_sec: hasMeasuredAudio ? probedAudioDuration : null,
+            fit_source: hasMeasuredAudio ? 'audio' : 'estimate',
             frame_count: graph.nodes.length,
           });
         } catch (err) {
@@ -2183,18 +2182,13 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           audioAssetId?: string;
         };
         const byFrame = bodyRaw.narrationByFrame ?? {};
-        const lenOf = (id: string) => (byFrame[id]?.trim().length ?? 0);
-        const totalChars = graph.nodes.reduce((s, n) => s + lenOf(n.id), 0);
-        if (totalChars === 0) {
+        const narrationSegments = graph.nodes.map((node) => byFrame[node.id]?.trim() ?? '');
+        if (!narrationSegments.some(Boolean)) {
           return json(res, 400, { error: 'No narration yet — draft narration first, then fit.' });
         }
         const MIN = 2;
-        // Keep total duration, but if there isn't enough to give every frame the
-        // minimum at its char-share, scale the total up so MIN is always honored
-        // (≈0.18s of speech per character is a comfortable narration pace).
-        const SEC_PER_CHAR = 0.18;
         const currentTotal = graph.nodes.reduce((s, n) => s + (n.durationSec ?? MIN), 0);
-        const neededForSpeech = Math.ceil(totalChars * SEC_PER_CHAR);
+        const neededForSpeech = narrationSegments.reduce((sum, text) => sum + estimateNarrationSeconds(text), 0);
         // If a synthesized narration audio asset is provided, probe its REAL
         // duration with ffprobe and use that as the authoritative total — far
         // more accurate than the chars-per-second heuristic. Falls back to the
@@ -2213,23 +2207,33 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           }
         }
         const total = audioTotal ?? Math.max(currentTotal, neededForSpeech, MIN * graph.nodes.length);
-        // Proportional by char share, then lift any frame below MIN.
-        const durs = graph.nodes.map((n) => ({ n, d: Math.max(MIN, Math.round((lenOf(n.id) / totalChars) * total)) }));
-        // Re-normalize so the rounded sum matches `total` (adjust the longest frame).
-        const sum = durs.reduce((s, x) => s + x.d, 0);
-        if (sum !== total && durs.length) {
-          const longest = durs.reduce((a, b) => (b.d > a.d ? b : a));
-          longest.d = Math.max(MIN, longest.d + (total - sum));
-        }
-        for (const { n, d } of durs) n.durationSec = d;
+        const durations = allocateNarrationDurations(narrationSegments, total, MIN);
+        graph.nodes.forEach((node, index) => {
+          node.durationSec = durations[index] ?? MIN;
+        });
         // preserveFrames: fit only re-times an EXISTING storyboard — must not
         // wipe the rendered frames (that left export with no frames → it fell
         // back to a single 5s template still instead of the multi-frame video).
         await ctx.orchestrator.writeContentGraph(projectId, graph, { preserveFrames: true });
-        const durations = Object.fromEntries(graph.nodes.map((n) => [n.id, n.durationSec]));
+        // Refresh the canonical timing variables inside existing frame HTML.
+        // Newly generated frames consume these variables for entrance/ambient/
+        // resolve motion, so a manual re-fit now changes both the clip boundary
+        // and its internal animation pacing.
+        const project = await ctx.orchestrator.load(projectId);
+        for (const node of graph.nodes) {
+          const frame = project.frames?.find((item) => item.graphNodeId === node.id);
+          if (!frame?.htmlPath || !existsSync(frame.htmlPath)) continue;
+          const html = await readFile(frame.htmlPath, 'utf8');
+          await ctx.orchestrator.writeFrameHtml(
+            projectId,
+            node.id,
+            applyFrameMotionTiming(html, node.durationSec ?? MIN),
+          );
+        }
+        const durationMap = Object.fromEntries(graph.nodes.map((n) => [n.id, n.durationSec]));
         return json(res, 200, {
           ok: true,
-          durations,
+          durations: durationMap,
           totalSec: graph.nodes.reduce((s, n) => s + (n.durationSec ?? 0), 0),
           ...(audioTotal !== undefined && { source: 'audio' as const }),
         });
@@ -3817,7 +3821,8 @@ function renderMotionExportContract(): string {
     'Full-frame image/video backgrounds must use object-fit:cover, not contain. Keep text inside safe margins, but make the background/root reach all four edges.',
     'Motion/export contract (REQUIRED): the animation must be real browser-recordable motion that survives MP4 export.',
     'Use CSS @keyframes, a finite GSAP timeline that auto-plays, or requestAnimationFrame. The page must start motion by itself after load; do not rely on hover, scroll, clicks, or editor-only controls.',
-    'Include visible change across the first 0.3-1.5 seconds (position, opacity, scale, stroke-dashoffset, counter/bar growth, wipe, or scene reveal), and keep a stable final state for the rest of the frame.',
+    'Include visible change near the start (position, opacity, scale, stroke-dashoffset, counter/bar growth, wipe, or scene reveal), preserve a readable middle section, and settle cleanly before the frame ends.',
+    'Pace motion against the frame-specific timing plan: brisk build, readable breathe phase with only finite subtle motion, then a short resolve. Do not use one fixed timeline for every shot length.',
     'Use finite animation iterations. Do not use CSS infinite loops, GSAP repeat:-1, Math.random(), Date.now(), or timer-driven randomness; export must be deterministic at every timestamp.',
     'Do not output only a static end frame. Do not create paused-only timelines unless they are also exposed through window.__timelines and auto-play when opened normally.',
   ].join('\n');
@@ -4570,6 +4575,8 @@ interface SplitGenerateArgs {
   attachments: Attachment[];
   /** Exact per-frame source text used when agent planning is unavailable. */
   fallbackFrameTexts?: string[];
+  /** Authoritative shot lengths measured from narration or source footage. */
+  frameDurationsSec?: number[];
   /** The user's original opening subject, locked across phases. */
   openingTopic?: string;
   /**
@@ -4595,7 +4602,7 @@ interface SplitGenerateArgs {
 async function runSplitMultiFrameGenerate(
   args: SplitGenerateArgs,
 ): Promise<{ frameCount: number; intent: string }> {
-  const { ctx, projectId, projectDir, agentDef, agentModel, tmpl, priorHtml, inputs, attachments, fallbackFrameTexts, openingTopic, restyleOnly, failOnAgentError, onProgress, onSse } = args;
+  const { ctx, projectId, projectDir, agentDef, agentModel, tmpl, priorHtml, inputs, attachments, fallbackFrameTexts, frameDurationsSec, openingTopic, restyleOnly, failOnAgentError, onProgress, onSse } = args;
   const collected = inputs.collected ?? {};
   const pickedType = inputs.pickedType ?? '';
   const pickedStyle = inputs.pickedStyle ?? '';
@@ -4617,10 +4624,17 @@ async function runSplitMultiFrameGenerate(
   // card so a short total ÷ many frames can't produce a rushed clip. Fall back
   // to total ÷ frames for older projects that only stored `duration`.
   const perFrameInput = Number(collected.per_frame ?? '') || 0;
-  const perFrameDurationSec = perFrameInput > 0
+  const measuredDurations = frameDurationsSec?.length === frameCountReq
+    ? frameDurationsSec.map((value) => Math.max(0.8, value))
+    : undefined;
+  const perFrameDurationSec = measuredDurations
+    ? measuredDurations.reduce((sum, value) => sum + value, 0) / measuredDurations.length
+    : perFrameInput > 0
     ? Math.max(2, perFrameInput)
     : Math.max(2, Math.floor((Number(collected.duration ?? '15') || 15) / frameCountReq));
-  const totalDurationSec = perFrameInput > 0
+  const totalDurationSec = measuredDurations
+    ? measuredDurations.reduce((sum, value) => sum + value, 0)
+    : perFrameInput > 0
     ? perFrameDurationSec * frameCountReq
     : (Number(collected.duration ?? '15') || 15);
   let resolution = '1920×1080';
@@ -4694,7 +4708,10 @@ async function runSplitMultiFrameGenerate(
     graphPromptParts.push(templateBrief);
     graphPromptParts.push(`  Re-plan the storyboard so each frame's content fits the matching template structure. For list/ledger frames, provide multiple short comparable points. For metric/bar/stat frames, prefer concise labels and real numbers if present. For hero/quote frames, use one strong short sentence. Do not merely copy the old frame text into every slot.`);
   }
-  graphPromptParts.push(`- 总时长: ${totalDurationSec}s split across ${frameCountReq} frames (~${perFrameDurationSec}s each)`);
+  graphPromptParts.push(`- 总时长: ${totalDurationSec.toFixed(1)}s split across ${frameCountReq} frames (~${perFrameDurationSec.toFixed(1)}s each)`);
+  if (measuredDurations) {
+    graphPromptParts.push(`- 旁白实测镜头时长（必须逐帧使用）: ${measuredDurations.map((value, index) => `frame ${index + 1}=${value.toFixed(1)}s`).join(', ')}`);
+  }
   graphPromptParts.push('');
   if (sourceTexts.length > 0) {
     graphPromptParts.push(`GROUNDING (REQUIRED): every node's text must come from the SOURCE MATERIAL above — quote its real product names, facts, numbers. The synopsis must name the source's actual subject. BANNED: generic filler about the content TYPE (e.g. "什么是概念解说", "信息密度×传播效率") that would fit any video. If a line could fit any topic, it's wrong.`);
@@ -4711,7 +4728,7 @@ async function runSplitMultiFrameGenerate(
       const node: Record<string, unknown> = {
         id: `frame_${i + 1}`,
         kind,
-        durationSec: perFrameDurationSec,
+        durationSec: measuredDurations?.[i] ?? perFrameDurationSec,
         text: '<headline / subtitle for this frame>',
       };
       // Every data node carries structured items so it can be rendered natively
@@ -4807,6 +4824,11 @@ async function runSplitMultiFrameGenerate(
       fallbackSynopsis: pickedType || tmpl?.name_zh || tmpl?.name || '模板适配视频',
     });
   }
+  if (measuredDurations?.length === graph.nodes.length) {
+    graph.nodes.forEach((node, index) => {
+      node.durationSec = measuredDurations[index]!;
+    });
+  }
   await ctx.orchestrator.writeContentGraph(projectId, graph);
   onProgress(`✓ 故事板规划完成：${graph.nodes.length} 帧 (${graph.intent})`);
   onSse({ type: 'plan_ready', frame_count: graph.nodes.length, intent: graph.intent });
@@ -4849,6 +4871,7 @@ async function runSplitMultiFrameGenerate(
       templateHtml,
       templateDir: tmpl?.__dir,
       templatePosterUrl: templatePosterFileUrl(tmpl),
+      durationSec: node.durationSec ?? perFrameDurationSec,
     });
     const fp: string[] = [];
     fp.push(`Generate ONE complete HTML page for frame "${nodeId}" of a ${graph.nodes.length}-frame video. Output ONE \`\`\`html block, nothing else.`);
@@ -4862,6 +4885,7 @@ async function runSplitMultiFrameGenerate(
       fp.push(`Subject (locked): "${openingTopic}". This frame is about this subject; "随机/随便" anywhere in the inputs means you pick details, not a new topic.`);
     }
     fp.push(`Duration: ${node.durationSec ?? perFrameDurationSec}s`);
+    fp.push(renderFrameMotionTimingPrompt(node.durationSec ?? perFrameDurationSec));
     fp.push(`Type: ${pickedType}`);
     if (styleLabel) fp.push(`Style: ${styleLabel}`);
     fp.push(`Resolution: ${aspect} (${resolution})`);
@@ -4947,6 +4971,7 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
         `Frame purpose: ${frameContext}.`,
         `Style: ${styleLabel || 'tasteful default'}.`,
         `Resolution: ${resolution}.`,
+        renderFrameMotionTimingPrompt(node.durationSec ?? perFrameDurationSec),
         contentTurns.length ? `Content: ${contentTurns.join(' / ').slice(0, 200)}` : '',
         templateReference
           ? templateReference
@@ -4987,8 +5012,10 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
         templateHtml,
         templateDir: tmpl?.__dir,
         templatePosterUrl: templatePosterFileUrl(tmpl),
+        durationSec: node.durationSec ?? perFrameDurationSec,
       });
     }
+    extracted = applyFrameMotionTiming(extracted, node.durationSec ?? perFrameDurationSec);
     await ctx.orchestrator.writeFrameHtml(projectId, nodeId, extracted);
     // Native Remotion enhancement (opt-in via format card). The frame now has a
     // FrameRecord, so enhanceFrameNative can set engine/nativeTemplateId/data in
@@ -5364,7 +5391,7 @@ async function generateLocalTalkingHeadStoryboard(
     kind: 'text' as const,
     label: `${options.type} ${i + 1}`,
     frameIntent: i === 0 ? 'intro' : i === segments.length - 1 ? 'outro' : 'subtitle',
-    durationSec: Math.max(3, Math.ceil((seg.endSec - seg.startSec) || 3)),
+    durationSec: Math.max(0.8, Math.round(((seg.endSec - seg.startSec) || 3) * 10) / 10),
     text: frameTextForCaptionMode(seg.text.trim(), options.caption_mode, i),
   }));
   const graph: import('@html-video/content-graph').ContentGraph = {
@@ -5381,7 +5408,8 @@ async function generateLocalTalkingHeadStoryboard(
   };
   await ctx.orchestrator.writeContentGraph(projectId, graph);
   for (let i = 0; i < nodes.length; i++) {
-    await ctx.orchestrator.writeFrameHtml(projectId, nodes[i]!.id, localTranscriptFrameHtml({
+    const durationSec = nodes[i]!.durationSec ?? 3;
+    const html = localTranscriptFrameHtml({
       index: i,
       total: nodes.length,
       text: nodes[i]!.text,
@@ -5394,7 +5422,13 @@ async function generateLocalTalkingHeadStoryboard(
       templateHtml,
       templateDir: tmpl?.__dir,
       templatePosterUrl: templatePosterFileUrl(tmpl),
-    }));
+      durationSec,
+    });
+    await ctx.orchestrator.writeFrameHtml(
+      projectId,
+      nodes[i]!.id,
+      applyFrameMotionTiming(html, durationSec),
+    );
   }
   return { frameCount: nodes.length };
 }
@@ -5539,6 +5573,7 @@ type LocalTemplateFrameArgs = {
   templateHtml?: string;
   templateDir?: string;
   templatePosterUrl?: string;
+  durationSec?: number;
 };
 
 function localTranscriptFrameHtml(args: LocalTemplateFrameArgs): string {
@@ -5591,6 +5626,9 @@ function localTranscriptFrameHtml(args: LocalTemplateFrameArgs): string {
       letter-spacing: .18em;
       font-weight: 700;
       color: ${palette.accentSoft};
+      opacity: 0;
+      transform: translateY(12px);
+      animation: rise var(--hv-enter-duration, .65s) ease-out var(--hv-enter-start, .12s) forwards;
     }
     h1 {
       max-width: 1160px;
@@ -5601,13 +5639,16 @@ function localTranscriptFrameHtml(args: LocalTemplateFrameArgs): string {
       font-weight: 780;
       text-wrap: balance;
       text-shadow: 0 18px 50px rgba(0,0,0,.32);
-      animation: rise .75s cubic-bezier(.2,.8,.2,1) both;
+      animation: rise var(--hv-enter-duration, .75s) cubic-bezier(.2,.8,.2,1) calc(var(--hv-enter-start, .12s) + var(--hv-stagger, .1s)) both;
     }
     .synopsis {
       max-width: 920px;
       color: ${palette.muted};
       font-size: 24px;
       line-height: 1.5;
+      opacity: 0;
+      transform: translateY(18px);
+      animation: rise var(--hv-enter-duration, .75s) ease-out calc(var(--hv-enter-start, .12s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s)) forwards;
     }
     .type {
       position: absolute;
@@ -5631,11 +5672,14 @@ function localTranscriptFrameHtml(args: LocalTemplateFrameArgs): string {
       width: 420px;
       height: 2px;
       background: linear-gradient(90deg, ${palette.accent}, rgba(255,255,255,.15));
+      transform-origin: left;
+      animation: breatheLine var(--hv-ambient-cycle, 2.4s) ease-in-out var(--hv-build-end, 1s) var(--hv-ambient-iterations, 1) alternate;
     }
     @keyframes rise {
       from { opacity: 0; transform: translateY(28px); }
       to { opacity: 1; transform: translateY(0); }
     }
+    @keyframes breatheLine { from { transform: scaleX(.82); opacity: .68; } to { transform: scaleX(1); opacity: 1; } }
   </style>
 </head>
 <body>
@@ -5702,7 +5746,7 @@ function localGenericSelectedTemplateFrameHtml(args: LocalTemplateFrameArgs): st
       opacity: .86;
       transform: scale(1.01);
       transform-origin: center;
-      animation: templateDrift 8s ease-in-out 2 alternate;
+      animation: templateDrift var(--hv-ambient-cycle, 2.4s) ease-in-out var(--hv-build-end, 1s) var(--hv-ambient-iterations, 1) alternate;
     }
     .shade {
       position: absolute;
@@ -5729,7 +5773,7 @@ function localGenericSelectedTemplateFrameHtml(args: LocalTemplateFrameArgs): st
       text-transform: uppercase;
       opacity: 0;
       transform: translateY(-14px);
-      animation: in .55s ease-out .2s forwards;
+      animation: in var(--hv-enter-duration, .55s) ease-out var(--hv-enter-start, .2s) forwards;
     }
     .template-name { max-width: 62vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 780; }
     .counter { font-variant-numeric: tabular-nums; color: rgba(248,245,238,.72); }
@@ -5743,7 +5787,7 @@ function localGenericSelectedTemplateFrameHtml(args: LocalTemplateFrameArgs): st
       backdrop-filter: blur(10px);
       opacity: 0;
       transform: translateY(34px);
-      animation: in .7s cubic-bezier(.16,1,.3,1) .38s forwards;
+      animation: in var(--hv-enter-duration, .7s) cubic-bezier(.16,1,.3,1) calc(var(--hv-enter-start, .2s) + var(--hv-stagger, .1s)) forwards;
     }
     .type {
       display: inline-flex;
@@ -5783,7 +5827,7 @@ function localGenericSelectedTemplateFrameHtml(args: LocalTemplateFrameArgs): st
       letter-spacing: .06em;
       opacity: 0;
       transform: translateY(14px);
-      animation: in .55s ease-out .74s forwards;
+      animation: in var(--hv-enter-duration, .55s) ease-out calc(var(--hv-enter-start, .2s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s)) forwards;
     }
     .rule { flex: 1; height: 1px; background: rgba(248,245,238,.46); }
     @keyframes in { to { opacity: 1; transform: translateY(0); } }
@@ -5876,7 +5920,7 @@ ${css}
       height: 100vh;
       aspect-ratio: auto;
       box-shadow: none;
-      animation: hvFrameIn 1.05s cubic-bezier(.16,1,.3,1) both;
+      animation: hvFrameIn var(--hv-enter-duration, 1.05s) cubic-bezier(.16,1,.3,1) var(--hv-enter-start, .1s) both;
     }
     .hv-template-stage > .frame h1,
     .hv-template-stage > .frame h2,
@@ -5890,15 +5934,15 @@ ${css}
     }
     .hv-template-stage > .frame .glitch .step,
     .hv-template-stage > .frame [class*="glitch"] .step {
-      animation: hvGlitchDrift 6.2s ease-in-out 2 alternate;
+      animation: hvGlitchDrift var(--hv-ambient-cycle, 3.1s) ease-in-out var(--hv-build-end, 1s) var(--hv-ambient-iterations, 1) alternate;
     }
     .hv-template-stage > .frame .ht {
       transform-origin: left center;
-      animation: hvRuleDraw 1.05s cubic-bezier(.16,1,.3,1) .08s both;
+      animation: hvRuleDraw var(--hv-enter-duration, 1.05s) cubic-bezier(.16,1,.3,1) var(--hv-enter-start, .08s) both;
     }
     .hv-template-stage > .frame .hb {
       transform-origin: right center;
-      animation: hvRuleDraw 1.05s cubic-bezier(.16,1,.3,1) .26s both;
+      animation: hvRuleDraw var(--hv-enter-duration, 1.05s) cubic-bezier(.16,1,.3,1) calc(var(--hv-enter-start, .08s) + var(--hv-stagger, .12s)) both;
     }
     .hv-template-stage > .frame .body > *,
     .hv-template-stage > .frame .tb,
@@ -5915,7 +5959,7 @@ ${css}
     .hv-template-stage > .frame .r:nth-child(5) { animation-delay: 1.04s; }
     .hv-template-stage > .frame .pg { animation-delay: 1.12s; }
     .hv-template-stage > .frame .qr i.on {
-      animation: hvQrPulse 3.8s steps(2,end) 2;
+      animation: hvQrPulse var(--hv-ambient-cycle, 3.8s) steps(2,end) var(--hv-build-end, 1s) var(--hv-ambient-iterations, 1);
     }
     .hv-template-stage > .frame .qr i.on:nth-child(3n) { animation-delay: .44s; }
     .hv-template-stage > .frame .qr i.on:nth-child(4n) { animation-delay: .92s; }
@@ -6570,20 +6614,20 @@ function localWechatAiDispatchTranscriptFrameHtml(args: LocalTemplateFrameArgs):
       background-size: 72px 72px, 72px 72px, auto, auto;
     }
     .stage { position: absolute; inset: 58px 94px 76px; }
-    .rule { position: absolute; left: 0; right: 0; height: 3px; background: var(--ink); transform-origin: left; animation: rule .8s cubic-bezier(.16,1,.3,1) forwards; }
+    .rule { position: absolute; left: 0; right: 0; height: 3px; background: var(--ink); transform-origin: left; animation: rule var(--hv-enter-duration, .8s) cubic-bezier(.16,1,.3,1) var(--hv-enter-start, .1s) forwards; }
     .top { top: 0; }
     .bottom { bottom: 72px; animation-delay: .2s; }
-    .header { position: absolute; top: 36px; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; opacity: 0; transform: translateY(14px); animation: in .55s ease-out .35s forwards; }
+    .header { position: absolute; top: 36px; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; opacity: 0; transform: translateY(14px); animation: in var(--hv-enter-duration, .55s) ease-out calc(var(--hv-enter-start, .1s) + var(--hv-stagger, .1s)) forwards; }
     .brand { font-size: 34px; font-weight: 760; }
     .system { color: var(--muted); font: 19px var(--mono); letter-spacing: .12em; }
-    .panel { position: absolute; left: 0; right: 0; top: 132px; bottom: 148px; border: 2px solid rgba(32,37,33,.15); background: rgba(247,249,245,.42); opacity: 0; transform: translateY(18px); animation: in .65s ease-out .55s forwards; }
-    .panel::before { content: ""; position: absolute; top: 0; bottom: 0; left: 610px; width: 2px; background: rgba(32,37,33,.12); transform-origin: top; transform: scaleY(0); animation: lineY .75s ease-out .8s forwards; }
+    .panel { position: absolute; left: 0; right: 0; top: 132px; bottom: 148px; border: 2px solid rgba(32,37,33,.15); background: rgba(247,249,245,.42); opacity: 0; transform: translateY(18px); animation: in var(--hv-enter-duration, .65s) ease-out calc(var(--hv-enter-start, .1s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s)) forwards; }
+    .panel::before { content: ""; position: absolute; top: 0; bottom: 0; left: 610px; width: 2px; background: rgba(32,37,33,.12); transform-origin: top; transform: scaleY(0); animation: lineY var(--hv-enter-duration, .75s) ease-out calc(var(--hv-enter-start, .1s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s)) forwards; }
     .copy { position: absolute; left: 32px; top: 54px; width: 520px; }
     .mark { display: flex; align-items: center; gap: 14px; color: var(--green); font: 800 20px var(--mono); letter-spacing: .08em; opacity: 0; transform: translateY(16px); animation: in .52s ease-out .85s forwards; }
     .mark::before { content: ""; width: 34px; height: 4px; background: currentColor; }
-    h1 { margin: 32px 0 0; font-size: 64px; line-height: 1.08; font-weight: 820; letter-spacing: 0; text-wrap: balance; opacity: 0; transform: translateY(28px); animation: in .7s cubic-bezier(.16,1,.3,1) 1s forwards; }
-    .lede { margin-top: 24px; color: #4f5751; font-size: 23px; line-height: 1.44; opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.18s forwards; }
-    .pill { margin-top: 30px; width: 430px; min-height: 78px; display: flex; align-items: center; padding: 0 30px; border: 3px solid var(--ink); border-radius: 16px; background: rgba(255,255,255,.5); font-size: 25px; font-weight: 760; opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.35s forwards; }
+    h1 { margin: 32px 0 0; font-size: 64px; line-height: 1.08; font-weight: 820; letter-spacing: 0; text-wrap: balance; opacity: 0; transform: translateY(28px); animation: in var(--hv-enter-duration, .7s) cubic-bezier(.16,1,.3,1) calc(var(--hv-enter-start, .1s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s)) forwards; }
+    .lede { margin-top: 24px; color: #4f5751; font-size: 23px; line-height: 1.44; opacity: 0; transform: translateY(18px); animation: in var(--hv-enter-duration, .55s) ease-out calc(var(--hv-enter-start, .1s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s) + var(--hv-stagger, .1s)) forwards; }
+    .pill { margin-top: 30px; width: 430px; min-height: 78px; display: flex; align-items: center; padding: 0 30px; border: 3px solid var(--ink); border-radius: 16px; background: rgba(255,255,255,.5); font-size: 25px; font-weight: 760; opacity: 0; transform: translateY(18px); animation: in var(--hv-enter-duration, .55s) ease-out var(--hv-build-end, 1.35s) forwards; }
     .network { position: absolute; left: 690px; right: 58px; top: 74px; bottom: 64px; }
     .map-title { position: absolute; left: 0; top: 0; color: var(--muted); font: 800 18px var(--mono); letter-spacing: .1em; }
     .hub { position: absolute; left: 46%; top: 48%; width: 214px; height: 214px; border-radius: 50%; border: 5px solid var(--blue); background: #edf6ff; display: grid; place-items: center; color: var(--blue); box-shadow: 0 0 0 18px var(--blue-soft); transform: translate(-50%,-50%) scale(.86); opacity: 0; animation: hub .75s cubic-bezier(.16,1,.3,1) 1s forwards, pulse 2.6s ease-in-out 2s 2; }
@@ -6599,7 +6643,7 @@ function localWechatAiDispatchTranscriptFrameHtml(args: LocalTemplateFrameArgs):
     .c1 { left: 276px; top: 186px; width: 270px; --rot: 34deg; animation-delay: 1.22s; }
     .c2 { left: 590px; top: 186px; width: 294px; --rot: -35deg; animation-delay: 1.3s; }
     .c3 { left: 602px; top: 342px; width: 316px; height: 5px; background: var(--green); --rot: 3deg; animation-delay: 1.55s; }
-    .metrics { position: absolute; left: 0; right: 338px; bottom: 0; height: 76px; display: grid; grid-template-columns: repeat(3,1fr); border-top: 2px solid rgba(32,37,33,.16); border-bottom: 2px solid rgba(32,37,33,.16); opacity: 0; transform: translateY(18px); animation: in .55s ease-out 1.65s forwards; }
+    .metrics { position: absolute; left: 0; right: 338px; bottom: 0; height: 76px; display: grid; grid-template-columns: repeat(3,1fr); border-top: 2px solid rgba(32,37,33,.16); border-bottom: 2px solid rgba(32,37,33,.16); opacity: 0; transform: translateY(18px); animation: in var(--hv-enter-duration, .55s) ease-out var(--hv-build-end, 1.65s) forwards; }
     .metric { display: flex; align-items: center; gap: 14px; padding: 0 22px; border-right: 2px solid rgba(32,37,33,.12); }
     .metric:last-child { border-right: 0; }
     .metric b { color: var(--green); font: 800 28px var(--mono); }
