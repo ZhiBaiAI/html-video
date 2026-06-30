@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-cobalt-grid
-name: 钴蓝网格 · Cobalt Grid
+name: Cobalt Grid
 name_zh: 钴蓝网格
-description: >
+description_zh: >
   编辑感纸面和钴蓝网格系统，Newsreader 标题配 Hanken Grotesk 正文，适合研究报告、数据故事和严肃叙事。
-description_en: >
+description: >
   Editorial parchment + cobalt grid system, Newsreader display, Hanken Grotesk reading
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

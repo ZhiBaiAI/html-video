@@ -102,10 +102,23 @@ export function analyzeTemplateSource(template: TemplateMetadata, source: string
           : 'none';
   const errors: string[] = [];
   const warnings: string[] = [];
-  if (!template.name_zh?.trim()) errors.push('name_zh is required for the Chinese-first Studio');
-  if (!template.description_zh?.trim() && !/[\u3400-\u9fff]/u.test(template.description)) {
-    errors.push('description_zh is required when the primary description is not Chinese');
+  const hasChinese = (value: string | undefined) => /[\u3400-\u9fff]/u.test(value ?? '');
+  if (!template.name_zh?.trim() || !hasChinese(template.name_zh)) {
+    errors.push('name_zh must be a non-empty Chinese display name');
   }
+  if (hasChinese(template.name)) errors.push('name must be the canonical English display name');
+  if (!template.description_zh?.trim() || !hasChinese(template.description_zh)) {
+    errors.push('description_zh must be a non-empty Chinese description');
+  }
+  if (hasChinese(template.description)) errors.push('description must be the canonical English description');
+  if (template.description_en?.trim()) errors.push('description_en is deprecated; use description for English');
+  if (new Set(template.tags).size !== template.tags.length) errors.push('tags must not contain duplicates');
+  if (template.tags.some((tag) => tag !== tag.toLowerCase())) errors.push('tags must use lowercase values');
+  const duration = template.output?.duration;
+  if (duration && (duration.default_sec < duration.min_sec || duration.default_sec > duration.max_sec)) {
+    errors.push('output.duration.default_sec must be inside the supported range');
+  }
+  if (template.preview?.loop) errors.push('preview.loop is not allowed; template previews must be static');
   if (motion === 'none') errors.push('source entry has no load-triggered motion');
   if (/\b(?:Math\.random|Date\.now|crypto\.randomUUID)\s*\(/.test(source)) {
     errors.push('source contains nondeterministic time/random input');
@@ -149,6 +162,18 @@ async function readTemplateSource(
     errors.push(`preview poster missing: ${template.preview.poster}`);
   } else if ((await stat(poster)).size === 0) {
     errors.push(`preview poster is empty: ${template.preview.poster}`);
+  } else {
+    const dimensions = await readPosterDimensions(poster);
+    if (!dimensions) {
+      warnings.push(`preview poster dimensions could not be read: ${template.preview.poster}`);
+    } else {
+      const output = template.output.resolution.default;
+      const posterAspect = dimensions.width / dimensions.height;
+      const outputAspect = output.width / output.height;
+      if (Math.abs(posterAspect - outputAspect) > 0.01) {
+        errors.push(`preview poster aspect ${dimensions.width}x${dimensions.height} does not match output ${output.width}x${output.height}`);
+      }
+    }
   }
 
   const entrySource = await readFile(entry, 'utf8');
@@ -184,9 +209,37 @@ async function readTemplateSource(
   }
   const inputProperties = (template.inputs.schema as { properties?: Record<string, unknown> })?.properties;
   if (inputProperties && Object.keys(inputProperties).length > 0 && (template.inputs.examples?.length ?? 0) === 0) {
-    warnings.push('template declares input properties but has no input example');
+    errors.push('template declares input properties but has no input example');
+  }
+  const requiredInputs = (template.inputs.schema as { required?: unknown })?.required;
+  if (Array.isArray(requiredInputs)) {
+    for (const [index, example] of template.inputs.examples.entries()) {
+      if (!example || typeof example !== 'object') {
+        errors.push(`input example ${index + 1} must be an object`);
+        continue;
+      }
+      const missing = requiredInputs.filter((key): key is string => typeof key === 'string' && !(key in example));
+      if (missing.length > 0) errors.push(`input example ${index + 1} misses required fields: ${missing.join(', ')}`);
+    }
   }
   return { source: chunks.join('\n'), errors, warnings };
+}
+
+async function readPosterDimensions(path: string): Promise<{ width: number; height: number } | undefined> {
+  const data = await readFile(path);
+  if (extname(path).toLowerCase() === '.png' && data.length >= 24
+    && data.subarray(1, 4).toString('ascii') === 'PNG') {
+    return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) };
+  }
+  if (extname(path).toLowerCase() === '.svg') {
+    const source = data.toString('utf8');
+    const width = Number(source.match(/<svg[^>]*\bwidth=["']([\d.]+)/i)?.[1]);
+    const height = Number(source.match(/<svg[^>]*\bheight=["']([\d.]+)/i)?.[1]);
+    if (width > 0 && height > 0) return { width, height };
+    const viewBox = source.match(/<svg[^>]*\bviewBox=["'][\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)/i);
+    if (viewBox) return { width: Number(viewBox[1]), height: Number(viewBox[2]) };
+  }
+  return undefined;
 }
 
 function isPathInside(root: string, candidate: string): boolean {

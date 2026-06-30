@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-daisy-days
-name: 雏菊晴天 · Daisy Days
+name: Daisy Days
 name_zh: 雏菊晴天
-description: >
+description_zh: >
   阳光花园粉彩、3px 炭黑描边、硬偏移阴影，Fredoka 与 Quicksand 组合，适合亲和、教育、社区和儿童向内容。
-description_en: >
+description: >
   Sunny-garden pastels, 3px charcoal outlines, hard offset shadows, Fredoka + Quicksand
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

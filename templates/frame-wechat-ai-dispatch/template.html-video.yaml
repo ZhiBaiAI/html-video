@@ -9,11 +9,6 @@ description: >
   metric strip, source note, and export-safe CSS motion.
 description_zh: >
   微信生态演示图风格的暖白技术分发模板：纸面网格、mono 标签、黑色细线、微信绿调度高亮、说明正文、关键点、蓝色 AI 中心节点、服务卡片、状态图例、指标条和可导出 CSS 动效。
-description_en: >
-  Warm-white technical distribution-system frame with paper grid, mono labels,
-  black hairlines, WeChat-green dispatch highlight, lede, insight rows, blue AI hub,
-  service nodes, route legend, metric strip, source note, and export-safe CSS motion.
-
 engine: hyperframes
 engine_version: ^0.4.0
 source_entry: source/index.html

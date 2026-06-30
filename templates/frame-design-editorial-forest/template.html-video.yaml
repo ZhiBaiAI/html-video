@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-editorial-forest
-name: 森林编辑部 · Editorial Forest
+name: Editorial Forest
 name_zh: 森林编辑部
-description: >
+description_zh: >
   森林绿、灰粉和奶油三色编辑系统，Source Serif 4 展示字、JetBrains Mono 导航和细线规则，适合年度报告、品牌故事和出版风格视频。
-description_en: >
+description: >
   Green/pink/cream editorial triad, Source Serif 4 display, JetBrains Mono chrome, hairline rules
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

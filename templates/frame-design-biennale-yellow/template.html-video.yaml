@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-biennale-yellow
-name: 双年展黄 · Biennale Yellow
+name: Biennale Yellow
 name_zh: 双年展黄
-description: >
+description_zh: >
   暖纸底色配太阳黄光晕，Instrument Serif 展示字、靛蓝墨色和 1px 发丝线，适合文化、展览、出版气质的视频。
-description_en: >
+description: >
   Warm parchment + solar yellow bloom, Instrument Serif display, indigo ink, 1px hairline rules
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

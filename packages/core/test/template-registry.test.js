@@ -9,7 +9,9 @@ function manifest(id, extra = '') {
   return `spec_version: 1
 id: ${id}
 name: ${id}
+name_zh: 测试模板
 description: Test template
+description_zh: 测试模板描述
 engine: hyperframes
 engine_version: ^0.4.0
 source_entry: index.html
@@ -30,8 +32,9 @@ output:
     type: variable
     min_sec: 3
     max_sec: 10
+    default_sec: 5
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 inputs:
   schema: { type: object }
   examples: [{}]
@@ -59,6 +62,19 @@ test('scan rejects invalid template metadata before registration', async () => {
   const registry = new TemplateRegistry();
   await assert.rejects(() => registry.scan(root), /id "different-id" must match directory "bad-template"/);
   assert.equal(registry.list().length, 0);
+});
+
+test('scan rejects templates that do not implement the unified output contract', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'hv-registry-output-contract-'));
+  const incomplete = manifest('incomplete-output')
+    .replace('    default_sec: 5\n', '')
+    .replace('audio: { supported: false, expected_inputs: [] }', 'audio: { supported: false }');
+  await writeTemplate(root, 'incomplete-output', incomplete);
+  const registry = new TemplateRegistry();
+  await assert.rejects(
+    () => registry.scan(root),
+    /output\.duration min_sec\/max_sec\/default_sec are required; output\.audio\.expected_inputs must be an array/,
+  );
 });
 
 test('search ranks data templates for github stars style intents', async () => {

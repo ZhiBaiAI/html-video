@@ -120,8 +120,8 @@ export class TemplateRegistry {
         const weightedFields: Array<[string, number]> = [
           [[...t.tags, t.category, t.subcategory ?? ''].join(' '), 0.26],
           [t.best_for.join(' '), 0.3],
-          [[t.name, t.name_zh ?? ''].join(' '), 0.18],
-          [[t.description, t.description_zh ?? '', t.description_en ?? ''].join(' '), 0.18],
+          [[t.name, t.name_zh].join(' '), 0.18],
+          [[t.description, t.description_zh].join(' '), 0.18],
           [t.engine, 0.08],
         ];
         const matched = new Set<string>();
@@ -198,7 +198,9 @@ function validateTemplateMetadata(meta: TemplateMetadata, dir: string, dirname: 
   if (meta.spec_version !== 1) errors.push('spec_version must be 1');
   reqString('id');
   reqString('name');
+  reqString('name_zh');
   reqString('description');
+  reqString('description_zh');
   reqString('engine');
   reqString('engine_version');
   reqString('source_entry');
@@ -213,11 +215,45 @@ function validateTemplateMetadata(meta: TemplateMetadata, dir: string, dirname: 
   }
   if (!meta.output?.formats?.length) errors.push('output.formats must be a non-empty array');
   if (!meta.output?.default_format) errors.push('output.default_format is required');
+  if (meta.output?.default_format && !meta.output.formats?.includes(meta.output.default_format)) {
+    errors.push('output.default_format must be listed in output.formats');
+  }
   if (!meta.output?.resolution?.default?.width || !meta.output?.resolution?.default?.height) {
     errors.push('output.resolution.default width/height are required');
   }
   if (!Array.isArray(meta.output?.resolution?.supported_aspects)) {
     errors.push('output.resolution.supported_aspects must be an array');
+  } else if (meta.output?.resolution?.default?.width && meta.output?.resolution?.default?.height) {
+    const { width, height } = meta.output.resolution.default;
+    const divisor = greatestCommonDivisor(width, height);
+    const defaultAspect = `${width / divisor}:${height / divisor}`;
+    if (!meta.output.resolution.supported_aspects.includes(defaultAspect)) {
+      errors.push(`output.resolution default aspect ${defaultAspect} must be listed in supported_aspects`);
+    }
+  }
+  if (!meta.output?.fps?.default || !Array.isArray(meta.output?.fps?.supported)) {
+    errors.push('output.fps default/supported are required');
+  } else if (!meta.output.fps.supported.includes(meta.output.fps.default)) {
+    errors.push('output.fps.default must be listed in output.fps.supported');
+  }
+  const duration = meta.output?.duration;
+  if (!duration || !Number.isFinite(duration.min_sec) || !Number.isFinite(duration.max_sec)
+    || !Number.isFinite(duration.default_sec)) {
+    errors.push('output.duration min_sec/max_sec/default_sec are required');
+  } else {
+    if (!['fixed', 'variable'].includes(duration.type)) errors.push('output.duration.type must be fixed or variable');
+    if (duration.min_sec <= 0 || duration.min_sec > duration.max_sec) {
+      errors.push('output.duration range is invalid');
+    }
+    if (duration.default_sec < duration.min_sec || duration.default_sec > duration.max_sec) {
+      errors.push('output.duration.default_sec must be inside the supported range');
+    }
+    if (duration.type === 'fixed' && (duration.min_sec !== duration.max_sec || duration.default_sec !== duration.min_sec)) {
+      errors.push('fixed output.duration must use the same min_sec/max_sec/default_sec');
+    }
+  }
+  if (!meta.output?.audio || !Array.isArray(meta.output.audio.expected_inputs)) {
+    errors.push('output.audio.expected_inputs must be an array');
   }
   if (!meta.inputs?.schema || typeof meta.inputs.schema !== 'object') {
     errors.push('inputs.schema is required');
@@ -233,6 +269,13 @@ function validateTemplateMetadata(meta: TemplateMetadata, dir: string, dirname: 
     errors.push('native.compositionId is required when native is set');
   }
   return errors;
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y !== 0) [x, y] = [y, x % y];
+  return x || 1;
 }
 
 function normaliseSearchText(text: string): string {

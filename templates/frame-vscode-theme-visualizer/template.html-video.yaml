@@ -36,7 +36,7 @@ output:
     max_sec: 132
     default_sec: 132
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

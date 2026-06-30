@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-bold-poster
-name: 强海报 · Bold Poster
+name: Bold Poster
 name_zh: 强海报
-description: >
+description_zh: >
   奶油纸面、红色强调和倾斜粗展示字，像杂志封面一样有标题冲击力，适合宣言、观点和开场。
-description_en: >
+description: >
   Shrikhand tilted display + red accent on cream — magazine cover energy
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

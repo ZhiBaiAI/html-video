@@ -171,9 +171,10 @@ export interface OutputCapabilities {
     type: 'variable' | 'fixed';
     min_sec: number;
     max_sec: number;
+    default_sec: number;
   };
   alpha: boolean;
-  audio: { supported: boolean; expected_inputs?: string[] };
+  audio: { supported: boolean; expected_inputs: string[] };
 }
 
 export interface LicenseInfo {
@@ -236,9 +237,10 @@ export interface TemplateMetadata {
   spec_version: 1;
   id: string;
   name: string;
-  name_zh?: string;
+  name_zh: string;
   description: string;
-  description_zh?: string;
+  description_zh: string;
+  /** @deprecated Use `description` for English and `description_zh` for Chinese. */
   description_en?: string;
   engine: EngineId;
   engine_version: string;

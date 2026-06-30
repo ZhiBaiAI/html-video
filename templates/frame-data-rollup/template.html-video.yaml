@@ -44,6 +44,7 @@ output:
     type: variable
     min_sec: 3
     max_sec: 8
+    default_sec: 6
   alpha: true
   audio:
     supported: false

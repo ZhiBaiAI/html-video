@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-cartesian
-name: 坐标极简 · Cartesian
+name: Cartesian
 name_zh: 坐标极简
-description: >
+description_zh: >
   稀疏克制的坐标系布局，暖纸底、墨色大字、灰褐强调和细线规则，适合理性、极简、设计系统说明。
-description_en: >
+description: >
   Minimal sparse layout — warm parchment, ink display type, taupe accents, hairline rules
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:

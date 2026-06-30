@@ -153,7 +153,6 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               name_zh: t.name_zh,
               description: t.description,
               description_zh: t.description_zh,
-              description_en: t.description_en,
               engine: t.engine,
               source_entry: t.source_entry,
               category: t.category,
@@ -2223,28 +2222,24 @@ function json(res: ServerResponse, code: number, body: unknown): void {
 }
 
 /**
- * Decide how the gallery should preview a template. Hyperframes HTML entries
- * render live in an iframe; native engine entries (for example Remotion
- * TypeScript compositions) use the shipped poster because loading source TS in
- * an iframe produces a blank card and can stall the preview modal.
+ * Every template uses the same static-frame preview contract. Hyperframes HTML
+ * entries are frozen at explicit timeline positions; native engine entries
+ * (for example Remotion TypeScript compositions) use the shipped poster because
+ * loading source TS in an iframe produces a blank card and can stall the modal.
  *
  * `posterUrl` is still surfaced (when the poster file exists) so the frontend
  * can fall back to a static poster if the live iframe ever fails to render.
  */
 function templatePreviewMode(
   t: import('@html-video/core').TemplateMetadata,
-): { mode: 'iframe' | 'poster'; posterUrl: string | null } {
+): { mode: 'static-frames'; posterUrl: string | null } {
   const posterRel = t.preview?.poster;
   const posterPath = posterRel && t.__dir ? join(t.__dir, posterRel) : null;
   const posterUrl =
     posterPath && existsSync(posterPath)
       ? `/template-asset/${t.id}/${posterRel}`
       : null;
-  const entry = t.source_entry ?? '';
-  if (t.engine !== 'hyperframes' || !entry.endsWith('.html')) {
-    return { mode: posterUrl ? 'poster' : 'iframe', posterUrl };
-  }
-  return { mode: 'iframe', posterUrl };
+  return { mode: 'static-frames', posterUrl };
 }
 
 type StaticTemplatePreviewFrame = {

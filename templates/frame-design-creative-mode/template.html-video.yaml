@@ -1,10 +1,10 @@
 spec_version: 1
 id: frame-design-creative-mode
-name: 创意模式 · Creative Mode
+name: Creative Mode
 name_zh: 创意模式
-description: >
+description_zh: >
   奶油底配高饱和糖果色，Archivo Black 大标题和 JetBrains Mono 数据标签，适合创意工具、工作流和活泼技术内容。
-description_en: >
+description: >
   Cream + saturated candy accents, Archivo Black display, JetBrains Mono data
 
 engine: hyperframes
@@ -35,7 +35,7 @@ output:
     max_sec: 30
     default_sec: 10
   alpha: false
-  audio: { supported: false }
+  audio: { supported: false, expected_inputs: [] }
 
 inputs:
   schema:
