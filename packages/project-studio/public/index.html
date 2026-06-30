@@ -694,12 +694,6 @@
     padding: 6px 18px; border-radius: var(--radius-sm); font-weight: 500; cursor: pointer; }
   .composer .send-btn:hover:not(:disabled) { background: var(--accent-hover); }
   .composer .send-btn:disabled { opacity: .4; cursor: not-allowed; }
-  .composer .composer-export-btn { background: var(--green-bg); color: var(--green);
-    border: 1px solid var(--green); padding: 5px 12px; border-radius: var(--radius-sm);
-    font-size: 12px; cursor: pointer; white-space: nowrap; }
-  .composer .composer-export-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-  .composer .composer-export-btn:disabled { opacity: .38; cursor: not-allowed; }
-
   /* ===== Right column: text editor (data-hv-text fields) ===== */
   /* Note: now sits to the right of the preview, hence border-LEFT not -right. */
   .text-pane { background: var(--bg-panel); border-left: 1px solid var(--border);
@@ -919,6 +913,16 @@
   .right-footer .status { color: var(--text-muted); font-family: var(--font-mono); }
   .right-footer .status b { color: var(--text); }
   .right-footer .grow { flex: 1; }
+  .right-footer .export-status { min-width: 0; max-width: min(360px, 42%);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text-muted); font-family: var(--font-mono); }
+  .right-footer .export-status.active { color: var(--green); }
+  .right-footer .export-status.error { color: var(--red); }
+  .right-footer .composer-export-btn { background: var(--green-bg); color: var(--green);
+    border: 1px solid var(--green); padding: 5px 12px; border-radius: var(--radius-sm);
+    font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .right-footer .composer-export-btn:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .right-footer .composer-export-btn:disabled { opacity: .42; cursor: not-allowed; }
   .right-footer .reload-btn { background: var(--bg); border: 1px solid var(--border);
     color: var(--text); padding: 4px 10px; border-radius: var(--radius-sm);
     cursor: pointer; font-size: 11px; }

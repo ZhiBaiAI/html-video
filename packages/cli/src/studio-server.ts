@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import type { CliContext } from './context.js';
-import type { Project, TemplateMetadata } from '@html-video/core';
+import type { Project, ProjectTalkingHeadOverlayMode, TemplateMetadata } from '@html-video/core';
 import {
   AssetStore,
   cloneBailianCosyVoice,
@@ -255,11 +255,26 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
 
       if (thMatch && thMatch[1] && m === 'PATCH') {
         try {
-          const body = (await readBody(req).catch(() => ({}))) as { audioMode?: string };
-          if (body.audioMode !== 'synthetic' && body.audioMode !== 'original') {
-            return json(res, 400, { error: 'audioMode must be synthetic or original' });
+          const body = (await readBody(req).catch(() => ({}))) as {
+            audioMode?: string;
+            overlayMode?: string;
+          };
+          let project = await ctx.orchestrator.load(thMatch[1]);
+          if (!project.talkingHead) {
+            return json(res, 400, { error: 'Project has no talking-head source selected' });
           }
-          const project = await ctx.orchestrator.setTalkingHeadAudioMode(thMatch[1], body.audioMode);
+          if (body.audioMode !== undefined) {
+            if (body.audioMode !== 'synthetic' && body.audioMode !== 'original') {
+              return json(res, 400, { error: 'audioMode must be synthetic or original' });
+            }
+            project = await ctx.orchestrator.setTalkingHeadAudioMode(thMatch[1], body.audioMode);
+          }
+          if (body.overlayMode !== undefined) {
+            if (!isTalkingHeadOverlayMode(body.overlayMode)) {
+              return json(res, 400, { error: 'overlayMode must be always or intermittent' });
+            }
+            project = await ctx.orchestrator.setTalkingHeadOverlayMode(thMatch[1], body.overlayMode);
+          }
           return json(res, 200, { project });
         } catch (err) {
           return json(res, 500, { error: err instanceof Error ? err.message : String(err) });
@@ -520,6 +535,11 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           if (!html || !/<\/html>/i.test(html)) {
             return json(res, 400, { error: 'Body must be a complete HTML document' });
           }
+          try {
+            assertEditableTextKeys(html, `frame "${nodeId}"`);
+          } catch (err) {
+            return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+          }
           await ctx.orchestrator.writeFrameHtml(projId, nodeId, html);
           return json(res, 200, { ok: true });
         }
@@ -612,7 +632,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             `Frame content to render: ${describeNode(node)}`,
             narration ? `Voiceover context for this frame (meaning only; do not paste verbatim unless it is already concise): ${narration.slice(0, 400)}` : ``,
             note ? `User note for this regeneration: ${note}` : ``,
-            `Aspect: ${aspect}. Resolution: ${resolution}. Inline CSS/JS. Full-bleed. Tag visible text with data-hv-text.`,
+            `Aspect: ${aspect}. Resolution: ${resolution}. Inline CSS/JS. Full-bleed. Tag visible text with non-empty stable keys, e.g. data-hv-text="headline". Boolean or empty data-hv-text is invalid.`,
             tmpl ? `Selected template: ${tmpl.name} — ${tmpl.description}. The regenerated frame MUST look like this template.` : ``,
             templateHtml ? `Template visual reference (REQUIRED):\n\`\`\`html\n${templateHtml}\n\`\`\`` : ``,
             siblingHtml ? `Sibling frame visual anchor (REQUIRED): match this video's palette, background, typography, spacing, and component treatment:\n\`\`\`html\n${siblingHtml.slice(0, 3600)}\n\`\`\`` : ``,
@@ -637,6 +657,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               throw new Error(`frame "${nodeId}" regeneration returned empty HTML`);
             }
           }
+          assertEditableTextKeys(extracted, `frame "${nodeId}"`);
           const { project: updatedProject } = await ctx.orchestrator.writeFrameHtml(projectId, nodeId, extracted);
           process.stderr.write(`[studio:frame-regenerate] proj=${projectId} frame=${nodeId} ok\n`);
           sse({ type: 'frame_regenerate_done', project: updatedProject, node_id: nodeId });
@@ -2022,7 +2043,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               sum.bgColors.length ? `Palette: ${sum.bgColors.join(' / ')}` : '',
               sum.fontFamilies.length ? `Fonts: ${sum.fontFamilies.join(', ')}` : '',
               ``,
-              `Begin reply with \`\`\`html. Tag visible text with data-hv-text. No prose outside the block.`,
+              `Begin reply with \`\`\`html. Tag visible text with non-empty stable keys, e.g. data-hv-text="headline". Boolean or empty data-hv-text is invalid. No prose outside the block.`,
             ].filter(Boolean).join('\n');
             let retryText = '';
             const retryHandle = spawnAgent({
@@ -2052,6 +2073,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             const extracted = extractHtmlDocument(assistantText);
             if (extracted) {
               try {
+                assertEditableTextKeys(extracted, `frame "${focusFrameId}"`);
                 await ctx.orchestrator.writeFrameHtml(id, focusFrameId, extracted);
                 sseWrite({ type: 'preview_ready', preview_url: `/preview/${id}`, focused_frame: focusFrameId });
                 summaryLine = `✓ frame ${focusFrameId} updated`;
@@ -2068,6 +2090,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
               await ctx.orchestrator.writeContentGraph(id, multi.graph);
               for (const f of multi.frames) {
                 try {
+                  assertEditableTextKeys(f.html, `frame "${f.nodeId}"`);
                   await ctx.orchestrator.writeFrameHtml(id, f.nodeId, f.html);
                 } catch (err) {
                   const msg = err instanceof Error ? err.message : String(err);
@@ -4427,7 +4450,7 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1.2s ease forwards;opacity:0
     if (summary.fontFamilies.length) it.push(`Fonts: ${summary.fontFamilies.join(', ')}`);
     it.push('');
   }
-  it.push(`Output: ONE complete HTML document. Begin your reply with \`\`\`html and end with \`\`\`. Inline all CSS / JS. Full-bleed 1920×1080. Tag visible text with data-hv-text (preserve existing keys when meaningful). No prose outside the block. Do NOT return an empty reply.`);
+  it.push(`Output: ONE complete HTML document. Begin your reply with \`\`\`html and end with \`\`\`. Inline all CSS / JS. Full-bleed 1920×1080. Tag visible text with non-empty stable keys, e.g. data-hv-text="headline" (preserve existing keys when meaningful). Boolean or empty data-hv-text is invalid. No prose outside the block. Do NOT return an empty reply.`);
   it.push('');
   it.push(`Skeleton to extend (replace with the real content + visual style):`);
   it.push('```html');
@@ -4501,6 +4524,26 @@ function extractHtmlDocument(text: string): string | null {
   const bare = /<!doctype html[\s\S]*?<\/html>/i.exec(text);
   if (bare) return bare[0];
   return null;
+}
+
+function assertEditableTextKeys(html: string, label = 'HTML'): void {
+  const invalid = invalidEditableTextKeys(html);
+  if (invalid.length > 0) {
+    throw new Error(`${label} has invalid editable text markup: ${invalid.length} data-hv-text attribute(s) are missing non-empty stable keys`);
+  }
+}
+
+function invalidEditableTextKeys(html: string): string[] {
+  const invalid: string[] = [];
+  const tagRe = /<([a-z][\w:-]*)\b[^>]*\bdata-hv-text(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tagRe.exec(html)) !== null) {
+    const value = match[2] ?? match[3] ?? match[4];
+    if (value === undefined || value.trim() === '') {
+      invalid.push(match[0].slice(0, 180));
+    }
+  }
+  return invalid;
 }
 
 /**
@@ -4909,7 +4952,7 @@ async function runSplitMultiFrameGenerate(
       for (const a of frameSourceTexts) fp.push((a.inlineText ?? '').slice(0, 3000));
       fp.push('');
     }
-    fp.push(`Output: begin with \`\`\`html and end with \`\`\`. Inline CSS + JS, full-bleed ${resolution}, opens with an animation timeline. Tag visible text with data-hv-text. CDN imports (Tailwind, GSAP) fine. No prose outside the block.`);
+    fp.push(`Output: begin with \`\`\`html and end with \`\`\`. Inline CSS + JS, full-bleed ${resolution}, opens with an animation timeline. Tag visible text with non-empty stable keys, e.g. data-hv-text="headline". Boolean or empty data-hv-text is invalid. CDN imports (Tailwind, GSAP) fine. No prose outside the block.`);
     fp.push(renderMotionExportContract());
     fp.push('');
     if (templateReference) {
@@ -4962,6 +5005,16 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
       process.stderr.write(`[studio:split-generate] proj=${projectId} frame=${nodeId} agent failed: ${message}\n`);
     }
     let extracted = extractHtmlFromAgentText(frameText);
+    if (extracted) {
+      try {
+        assertEditableTextKeys(extracted, `frame "${nodeId}"`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        frameFailures.push(message);
+        process.stderr.write(`[studio:split-generate] proj=${projectId} frame=${nodeId} invalid HTML: ${message}\n`);
+        extracted = undefined;
+      }
+    }
 
     // One retry on empty: shorter prompt, just the skeleton call.
     if (!extracted) {
@@ -4976,7 +5029,7 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
         templateReference
           ? templateReference
           : '',
-        `Begin your reply with \`\`\`html. Inline CSS, opens with animation, tag text with data-hv-text. No prose.`,
+        `Begin your reply with \`\`\`html. Inline CSS, opens with animation, tag text with non-empty stable keys, e.g. data-hv-text="headline". Boolean or empty data-hv-text is invalid. No prose.`,
         renderMotionExportContract(),
       ].filter(Boolean).join('\n\n');
       try {
@@ -4988,6 +5041,16 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
         frameText = '';
       }
       extracted = extractHtmlFromAgentText(frameText);
+      if (extracted) {
+        try {
+          assertEditableTextKeys(extracted, `frame "${nodeId}"`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          frameFailures.push(message);
+          process.stderr.write(`[studio:split-generate] proj=${projectId} frame=${nodeId} retry invalid HTML: ${message}\n`);
+          extracted = undefined;
+        }
+      }
     }
     if (!extracted) {
       process.stderr.write(
@@ -5016,6 +5079,7 @@ h1{font-size:8vw;letter-spacing:-.03em;animation:in 1s ease forwards;opacity:0;t
       });
     }
     extracted = applyFrameMotionTiming(extracted, node.durationSec ?? perFrameDurationSec);
+    assertEditableTextKeys(extracted, `frame "${nodeId}"`);
     await ctx.orchestrator.writeFrameHtml(projectId, nodeId, extracted);
     // Native Remotion enhancement (opt-in via format card). The frame now has a
     // FrameRecord, so enhanceFrameNative can set engine/nativeTemplateId/data in
@@ -5179,7 +5243,7 @@ async function handleLocalTalkingHeadFlow(args: {
     );
     return {
       frameCount: result.frameCount,
-      message: `✓ 已按确认设置生成 ${result.frameCount} 帧口播字幕视频。导出时${options.talking_head_overlay.startsWith('关') ? '不会叠加口播画中画' : '会保留右下角口播画中画和源视频音轨'}。`,
+      message: `✓ 已按确认设置生成 ${result.frameCount} 帧口播字幕视频。导出时${talkingHeadExportSummary(options)}。`,
     };
   }
 
@@ -5249,8 +5313,15 @@ function inferTalkingHeadDefaults(
     aspect: inferAspectFromProject(project),
     frame_count: String(frameCount),
     caption_mode: '关键句上屏',
-    talking_head_overlay: '开',
+    talking_head_overlay: '始终显示',
   });
+}
+
+function talkingHeadExportSummary(options: LocalTalkingHeadOptions): string {
+  const choice = normalizeTalkingHeadOverlayChoice(options.talking_head_overlay);
+  if (choice === '关闭') return '不会叠加口播画中画';
+  if (choice === '间歇显示') return '会间歇显示右下角口播画中画，并保留源视频音轨';
+  return '会始终显示右下角口播画中画，并保留源视频音轨';
 }
 
 function inferTalkingHeadTopic(text: string): string {
@@ -5284,8 +5355,27 @@ function normalizeLocalTalkingHeadOptions(
     aspect: (input.aspect ?? '').trim() || '16:9 横屏',
     frame_count: frameCount,
     caption_mode: (input.caption_mode ?? '').trim() || '关键句上屏',
-    talking_head_overlay: (input.talking_head_overlay ?? '').trim() || '开',
+    talking_head_overlay: normalizeTalkingHeadOverlayChoice(input.talking_head_overlay),
   };
+}
+
+function normalizeTalkingHeadOverlayChoice(value: string | undefined): '始终显示' | '间歇显示' | '关闭' {
+  const v = (value ?? '').trim();
+  if (v === '间歇显示' || v === '偶尔显示' || v === '间歇' || v === 'intermittent') return '间歇显示';
+  if (v === '关闭' || v === '关' || v === 'off' || v === 'disabled') return '关闭';
+  return '始终显示';
+}
+
+function isTalkingHeadOverlayEnabled(choice: string): boolean {
+  return normalizeTalkingHeadOverlayChoice(choice) !== '关闭';
+}
+
+function talkingHeadOverlayModeFromChoice(choice: string): ProjectTalkingHeadOverlayMode {
+  return normalizeTalkingHeadOverlayChoice(choice) === '间歇显示' ? 'intermittent' : 'always';
+}
+
+function isTalkingHeadOverlayMode(value: string): value is ProjectTalkingHeadOverlayMode {
+  return value === 'always' || value === 'intermittent';
 }
 
 function renderLocalTalkingHeadForm(
@@ -5334,8 +5424,9 @@ function renderLocalTalkingHeadForm(
         key: 'talking_head_overlay', label: '口播画中画', kind: 'buttons', required: true,
         default: defaults.talking_head_overlay,
         options: [
-          { value: '开', label: '开' },
-          { value: '关', label: '关' },
+          { value: '始终显示', label: '始终显示' },
+          { value: '间歇显示', label: '间歇显示' },
+          { value: '关闭', label: '关闭' },
         ],
       },
     ],
@@ -5424,11 +5515,9 @@ async function generateLocalTalkingHeadStoryboard(
       templatePosterUrl: templatePosterFileUrl(tmpl),
       durationSec,
     });
-    await ctx.orchestrator.writeFrameHtml(
-      projectId,
-      nodes[i]!.id,
-      applyFrameMotionTiming(html, durationSec),
-    );
+    const timedHtml = applyFrameMotionTiming(html, durationSec);
+    assertEditableTextKeys(timedHtml, `frame "${nodes[i]!.id}"`);
+    await ctx.orchestrator.writeFrameHtml(projectId, nodes[i]!.id, timedHtml);
   }
   return { frameCount: nodes.length };
 }
@@ -5442,7 +5531,8 @@ async function applyLocalTalkingHeadProjectOptions(
   const project = await ctx.projects.load(projectId);
   project.preferences = { ...project.preferences, resolution: { width, height } };
   if (project.talkingHead) {
-    project.talkingHead.enabled = !options.talking_head_overlay.startsWith('关');
+    project.talkingHead.enabled = isTalkingHeadOverlayEnabled(options.talking_head_overlay);
+    project.talkingHead.overlay.mode = talkingHeadOverlayModeFromChoice(options.talking_head_overlay);
   }
   await ctx.projects.save(project);
 }

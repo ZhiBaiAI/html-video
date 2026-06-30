@@ -432,6 +432,12 @@ export type ProjectTalkingHeadAudioMode =
   /** Deprecated legacy value from the first talking-head prototype; treated as synthetic. */
   | 'source';
 
+export type ProjectTalkingHeadOverlayMode =
+  /** Keep the speaker picture-in-picture visible for the whole export. */
+  | 'always'
+  /** Show the speaker picture-in-picture in short recurring moments. */
+  | 'intermittent';
+
 export interface ProjectTalkingHead {
   enabled: boolean;
   /** Legacy field name; may point to a video asset or an image/GIF asset. */
@@ -446,6 +452,7 @@ export interface ProjectTalkingHead {
     marginPx: number;
     shape?: 'circle' | 'rounded-rect';
     radiusPx?: number;
+    mode?: ProjectTalkingHeadOverlayMode;
   };
 }
 

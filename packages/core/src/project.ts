@@ -15,6 +15,7 @@ import type {
   FrameRecord,
   Project,
   ProjectTalkingHeadAudioMode,
+  ProjectTalkingHeadOverlayMode,
   ProjectStatus,
   TemplateMetadata,
   TemplateRef,
@@ -153,6 +154,7 @@ export class ProjectOrchestrator {
       shape?: 'circle' | 'rounded-rect';
       radiusPx?: number;
       audioMode?: ProjectTalkingHeadAudioMode;
+      overlayMode?: ProjectTalkingHeadOverlayMode;
     } = {},
   ): Promise<Project> {
     const project = await this.deps.projects.load(projectId);
@@ -175,6 +177,7 @@ export class ProjectOrchestrator {
         marginPx: opts.marginPx ?? project.talkingHead?.overlay.marginPx ?? 72,
         shape: opts.shape ?? project.talkingHead?.overlay.shape ?? 'circle',
         radiusPx: opts.radiusPx ?? project.talkingHead?.overlay.radiusPx ?? 9999,
+        mode: opts.overlayMode ?? project.talkingHead?.overlay.mode ?? 'always',
       },
     };
     await this.deps.projects.save(project);
@@ -187,6 +190,16 @@ export class ProjectOrchestrator {
       throw new HtmlVideoError('invalid-input', 'Project has no talking-head video selected');
     }
     project.talkingHead.audioMode = audioMode;
+    await this.deps.projects.save(project);
+    return project;
+  }
+
+  async setTalkingHeadOverlayMode(projectId: string, mode: ProjectTalkingHeadOverlayMode): Promise<Project> {
+    const project = await this.deps.projects.load(projectId);
+    if (!project.talkingHead) {
+      throw new HtmlVideoError('invalid-input', 'Project has no talking-head source selected');
+    }
+    project.talkingHead.overlay.mode = mode;
     await this.deps.projects.save(project);
     return project;
   }
@@ -877,6 +890,7 @@ export class ProjectOrchestrator {
       widthPct: overlayWidthPct,
       marginPx: overlayMarginPx,
       shape: th.overlay.shape ?? 'circle',
+      mode: th.overlay.mode ?? 'always',
       sourceType: sourceAsset.type === 'image' ? 'image' : 'video',
       sourceMimeType: sourceAsset.metadata.mimeType,
       ...(subtitlesPath !== undefined && { subtitlesPath }),
@@ -1110,6 +1124,7 @@ async function overlayTalkingHeadWithFfmpeg(args: {
   widthPct: number;
   marginPx: number;
   shape: 'circle' | 'rounded-rect';
+  mode: ProjectTalkingHeadOverlayMode;
   sourceType: 'video' | 'image';
   sourceMimeType?: string;
   subtitlesPath?: string;
@@ -1153,12 +1168,14 @@ function buildTalkingHeadOverlayFilter(args: {
   widthPct: number;
   marginPx: number;
   shape: 'circle' | 'rounded-rect';
+  mode: ProjectTalkingHeadOverlayMode;
   subtitlesPath?: string;
 }): string {
   const overlayWidth = Math.max(150, Math.round(args.outputWidth * (args.widthPct / 100)));
   const contentWidth = Math.max(120, Math.round(overlayWidth * 0.86));
   const margin = Math.max(0, Math.round(args.marginPx));
   const baseLabel = args.subtitlesPath ? 'baseSub' : '0:v';
+  const overlayOptions = `shortest=1:eof_action=pass${talkingHeadOverlayEnable(args.mode)}[vout]`;
   const subtitleFilter = args.subtitlesPath
     ? `[0:v]subtitles=filename='${escapeFfmpegFilterPath(args.subtitlesPath)}'[baseSub];`
     : '';
@@ -1167,13 +1184,17 @@ function buildTalkingHeadOverlayFilter(args: {
         `[1:v]scale=${contentWidth}:${contentWidth}:force_original_aspect_ratio=decrease,pad=${overlayWidth}:${overlayWidth}:(ow-iw)/2:(oh-ih)/2:color=0xE5EEF4,setsar=1,format=rgb24[th0]`,
         `nullsrc=s=${overlayWidth}x${overlayWidth},format=gray,geq=lum='if(lte((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2),(W/2)*(W/2)),255,0)'[mask]`,
         `[th0][mask]alphamerge[th]`,
-        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:shortest=1:eof_action=pass[vout]`,
+        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:${overlayOptions}`,
       ].join(';')
     : [
         `[1:v]scale=${overlayWidth}:-2,format=rgba[th]`,
-        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:shortest=1:eof_action=pass[vout]`,
+        `[${baseLabel}][th]overlay=W-w-${margin}:H-h-${margin}:${overlayOptions}`,
       ].join(';');
   return `${subtitleFilter}${overlayFilter}`;
+}
+
+function talkingHeadOverlayEnable(mode: ProjectTalkingHeadOverlayMode): string {
+  return mode === 'intermittent' ? ":enable='lt(mod(t,18),6)'" : '';
 }
 
 function isSubtitleFilterFailure(error: unknown): boolean {

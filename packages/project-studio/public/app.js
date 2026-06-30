@@ -134,6 +134,7 @@ const state = {
   messages: [],
   composing: false,
   textFields: [],          // [{key, original, current}]
+  textFieldInvalidCount: 0,
   textSaveTimer: null,
   pendingAttachments: [],  // [{file, dataUrl?, name, kind, size}] before send
   // v0.8: multi-frame timeline state
@@ -142,6 +143,7 @@ const state = {
   editTextMode: false,     // when true, preview iframe accepts inline text edits
   exporting: false,        // export run in progress
   exportProgress: null,    // { pct, stage } during a streamed export
+  exportNotice: '',
   narrating: false,        // one-click narrate-to-video run in progress
   composerMode: 'describe', // describe | link | script
   composerTemplateId: '',
@@ -289,9 +291,9 @@ async function startExportStream() {
   const projectId = state.selected.id;
   state.exporting = true;
   state.exportProgress = { pct: 0, stage: 'starting' };
+  state.exportNotice = t('export.starting');
   renderToolbar();
-  state.messages.push({ role: 'preview-event', content: t('export.starting'), ts: Date.now() });
-  renderChatLog();
+  renderFooter();
 
   let res;
   try {
@@ -303,16 +305,20 @@ async function startExportStream() {
   } catch (e) {
     state.exporting = false;
     state.exportProgress = null;
+    state.exportNotice = t('export.failed_short', { message: (e?.message ?? e) });
     toast(t('export.failed_short', { message: (e?.message ?? e) }), 'error');
     renderToolbar();
+    renderFooter();
     return;
   }
   if (!res.ok || !res.body) {
     state.exporting = false;
     state.exportProgress = null;
     const err = await res.text().catch(() => '');
+    state.exportNotice = t('export.failed_short', { message: err.slice(0, 200) });
     toast(t('export.failed_short', { message: err.slice(0, 200) }), 'error');
     renderToolbar();
+    renderFooter();
     return;
   }
 
@@ -332,17 +338,18 @@ async function startExportStream() {
         try { ev = JSON.parse(line.slice(6)); } catch { continue; }
         if (ev.type === 'export_progress') {
           state.exportProgress = { pct: ev.pct, stage: ev.stage };
+          state.exportNotice = t('export.button_running', {
+            pct: formatPct(ev.pct),
+            stage: ev.stage,
+          });
           renderToolbar();
+          renderFooter();
         } else if (ev.type === 'export_done') {
           state.exporting = false;
           state.exportProgress = null;
           if (ev.project) state.selected = ev.project;
           const seconds = ev.elapsed_ms ? `${(ev.elapsed_ms / 1000).toFixed(1)}s` : '';
-          state.messages.push({
-            role: 'preview-event',
-            content: seconds ? t('export.done_seconds', { seconds }) : t('export.done_no_seconds'),
-            ts: Date.now(),
-          });
+          state.exportNotice = seconds ? t('export.done_seconds', { seconds }) : t('export.done_no_seconds');
           state.messages.push({
             role: 'export-done',
             content: ev.output_path,
@@ -350,10 +357,12 @@ async function startExportStream() {
           });
           renderChatLog();
           renderToolbar();
+          renderFooter();
           refreshProjects();
         } else if (ev.type === 'export_failed') {
           state.exporting = false;
           state.exportProgress = null;
+          state.exportNotice = t('export.failed', { message: ev.message });
           state.messages.push({
             role: 'system',
             content: t('export.failed', { message: ev.message }),
@@ -361,14 +370,17 @@ async function startExportStream() {
           });
           renderChatLog();
           renderToolbar();
+          renderFooter();
         }
       }
     }
   } catch (e) {
     state.exporting = false;
     state.exportProgress = null;
+    state.exportNotice = t('export.stream_interrupted', { message: (e?.message ?? e) });
     toast(t('export.stream_interrupted', { message: (e?.message ?? e) }), 'error');
     renderToolbar();
+    renderFooter();
   }
 }
 
@@ -579,6 +591,9 @@ async function selectProject(id) {
   state.editTextMode = false;
   state.enhancing = null;
   state.regeneratingFrame = null;
+  state.exporting = false;
+  state.exportProgress = null;
+  state.exportNotice = '';
   state.composerTemplateId = state.selected?.templateId || '';
   state.composerAspect = selectedAspectRatio();
   state.composerVoiceId = state.defaultNarrationVoiceId || '';
@@ -1037,7 +1052,6 @@ function renderMain() {
                 <button class="icon-btn" id="btn-attach" title="${t('composer.attach')}">📎</button>
                 <input type="file" id="file-input" multiple style="display:none" />
                 <span class="hint">${t('composer.hint')}</span>
-                <button class="composer-export-btn" id="composer-export" disabled>${t('composer.export')}</button>
                 <button class="send-btn" id="btn-send" disabled>${t('composer.send')}</button>
               </div>
             </div>
@@ -1053,6 +1067,8 @@ function renderMain() {
           <div class="right-footer">
             <span class="status" id="footer-status">${t('app.no_project')}</span>
             <span class="grow"></span>
+            <span class="export-status" id="export-status"></span>
+            <button class="composer-export-btn" id="composer-export" disabled>${t('composer.export')}</button>
             <button class="reload-btn" id="btn-reload">${t('preview.reload')}</button>
           </div>
           <details class="talking-panel" id="talking-panel">
@@ -1070,6 +1086,13 @@ function renderMain() {
                   <select id="talking-audio-mode" class="st-voice-select">
                     <option value="synthetic">${t('talking.audio_synthetic')}</option>
                     <option value="original">${t('talking.audio_original')}</option>
+                  </select>
+                </label>
+                <label class="talking-audio-row">
+                  <span>${t('talking.overlay_mode')}</span>
+                  <select id="talking-overlay-mode" class="st-voice-select">
+                    <option value="always">${t('talking.overlay_always')}</option>
+                    <option value="intermittent">${t('talking.overlay_intermittent')}</option>
                   </select>
                 </label>
                 <div class="talking-actions">
@@ -1231,7 +1254,9 @@ function wireTalkingHeadPanel() {
   const statusEl = document.getElementById('talking-status');
   const previewEl = document.getElementById('talking-preview');
   const audioModeSelect = document.getElementById('talking-audio-mode');
+  const overlayModeSelect = document.getElementById('talking-overlay-mode');
   const normalizeAudioMode = (mode) => mode === 'original' ? 'original' : 'synthetic';
+  const normalizeOverlayMode = (mode) => mode === 'intermittent' ? 'intermittent' : 'always';
 
   const render = () => {
     const th = state.selected?.talkingHead;
@@ -1248,6 +1273,10 @@ function wireTalkingHeadPanel() {
       if (originalOption) originalOption.disabled = !isVideo;
       audioModeSelect.value = isVideo ? normalizeAudioMode(th?.audioMode) : 'synthetic';
     }
+    if (overlayModeSelect) {
+      overlayModeSelect.disabled = !th;
+      overlayModeSelect.value = normalizeOverlayMode(th?.overlay?.mode);
+    }
     if (previewEl) {
       const mediaSrc = media?.path ? `/asset?path=${encodeURIComponent(media.path)}` : '';
       const preview = isVideo
@@ -1262,6 +1291,7 @@ function wireTalkingHeadPanel() {
               <b>${esc(media.metadata?.filename || t('talking.source_fallback'))}</b>
               <span>${isVideo ? (transcript ? t('talking.transcript_ready') : t('talking.transcript_missing')) : t('talking.image_overlay_only')}</span>
               <span>${isVideo && normalizeAudioMode(th?.audioMode) === 'original' ? t('talking.audio_original') : t('talking.audio_synthetic')}</span>
+              <span>${normalizeOverlayMode(th?.overlay?.mode) === 'intermittent' ? t('talking.overlay_intermittent') : t('talking.overlay_always')}</span>
             </div>
           </div>`
         : `<div class="soundtrack-hint">${t('talking.empty')}</div>`;
@@ -1361,6 +1391,30 @@ function wireTalkingHeadPanel() {
         if (statusEl) statusEl.textContent = t('talking.failed', { message: e?.message ?? e });
       } finally {
         audioModeSelect.disabled = false;
+        render();
+      }
+    };
+  }
+
+  if (overlayModeSelect) {
+    overlayModeSelect.onchange = async () => {
+      if (!state.selected?.talkingHead) return;
+      const overlayMode = normalizeOverlayMode(overlayModeSelect.value);
+      overlayModeSelect.disabled = true;
+      try {
+        const r = await API.updateTalkingHead(state.selected.id, { overlayMode });
+        if (r.project) {
+          state.selected = r.project;
+          if (statusEl) statusEl.textContent = t('talking.overlay_saved');
+          render();
+          refreshProjects();
+        } else {
+          if (statusEl) statusEl.textContent = r.error || t('talking.failed', { message: 'save failed' });
+        }
+      } catch (e) {
+        if (statusEl) statusEl.textContent = t('talking.failed', { message: e?.message ?? e });
+      } finally {
+        overlayModeSelect.disabled = false;
         render();
       }
     };
@@ -1955,13 +2009,37 @@ function renderComposer() {
 function renderFooter() {
   const p = state.selected;
   const fs = document.getElementById('footer-status');
-  if (!fs) return;
-  if (p) {
+  if (fs && p) {
     fs.innerHTML = `<b>${esc(p.name)}</b> · ${p.templateId
       ? `${esc(t('project.template'))} <b>${esc(p.templateId)}</b>`
       : `<i>${esc(t('project.no_template'))}</i>`} · ${esc(projectStatusLabel(p.status))}`;
-  } else {
+  } else if (fs) {
     fs.textContent = t('app.no_project');
+  }
+  renderExportControls();
+}
+
+function renderExportControls() {
+  const p = state.selected;
+  const exportBtn = document.getElementById('composer-export');
+  const exportStatus = document.getElementById('export-status');
+  const hasFrames = !!(p && Array.isArray(p.frames) && p.frames.length > 0);
+  const canExport = !!p && (!!p.templateId || hasFrames);
+  if (exportBtn) {
+    exportBtn.disabled = !canExport || state.exporting || state.narrating;
+    exportBtn.textContent = state.exporting
+      ? (state.exportProgress
+        ? t('export.button_running', {
+            pct: formatPct(state.exportProgress.pct),
+            stage: state.exportProgress.stage,
+          })
+        : t('export.starting'))
+      : t('composer.export');
+  }
+  if (exportStatus) {
+    exportStatus.textContent = state.exporting || state.exportNotice ? state.exportNotice : '';
+    exportStatus.classList.toggle('active', !!state.exporting);
+    exportStatus.classList.toggle('error', !!state.exportNotice && /failed|失败|中断/i.test(state.exportNotice));
   }
 }
 
@@ -2687,6 +2765,10 @@ function attachTextEditOverlay(iframe) {
     if (!target) return;
     e.preventDefault();
     e.stopPropagation();
+    if (!String(target.getAttribute('data-hv-text') || '').trim()) {
+      toast('这段文字的 data-hv-text 缺少字段名，不能直接编辑。请重新生成该帧。', 'warn');
+      return;
+    }
     enableEdit(target);
   }, true);
   doc.addEventListener('input', (e) => {
@@ -2981,6 +3063,7 @@ async function fetchActiveFrameHtml() {
 async function refreshTextFields() {
   if (!state.selected) {
     state.textFields = [];
+    state.textFieldInvalidCount = 0;
     renderTextFields();
     return;
   }
@@ -2989,15 +3072,21 @@ async function refreshTextFields() {
   const html = await fetchActiveFrameHtml();
   if (!html) {
     state.textFields = [];
+    state.textFieldInvalidCount = 0;
     renderTextFields();
     return;
   }
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const nodes = doc.querySelectorAll('[data-hv-text]');
+  state.textFieldInvalidCount = 0;
   const seen = new Set();
   const fields = [];
   for (const el of nodes) {
-    const key = el.getAttribute('data-hv-text');
+    const key = (el.getAttribute('data-hv-text') || '').trim();
+    if (!key) {
+      state.textFieldInvalidCount += 1;
+      continue;
+    }
     if (!key || seen.has(key)) continue;
     seen.add(key);
     const text = el.textContent ?? '';
@@ -3015,6 +3104,10 @@ function renderTextFields() {
     return;
   }
   if (state.textFields.length === 0) {
+    if (state.textFieldInvalidCount > 0) {
+      wrap.innerHTML = `<div class="text-empty">当前帧的可编辑文字标记不合规：${state.textFieldInvalidCount} 处 data-hv-text 缺少字段名。标准写法是 data-hv-text="headline"。</div>`;
+      return;
+    }
     const hasFrames = (state.selected.frames?.length ?? 0) > 0;
     const hint = hasFrames ? t('text_pane.empty_with_frames') : t('text_pane.empty_no_frames');
     wrap.innerHTML = `<div class="text-empty">${hint}</div>`;
