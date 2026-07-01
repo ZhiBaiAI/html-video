@@ -17,7 +17,7 @@ import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs
 import { existsSync, readdirSync, type Dirent } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
   HtmlSceneOutput,
@@ -46,13 +46,13 @@ export function playwrightBrowserCacheRoot(
   configuredPath: string | undefined = process.env.PLAYWRIGHT_BROWSERS_PATH,
 ): string {
   if (configuredPath && configuredPath !== '0') return configuredPath;
-  if (platform === 'darwin') return join(home, 'Library', 'Caches', 'ms-playwright');
+  if (platform === 'darwin') return posix.join(home, 'Library', 'Caches', 'ms-playwright');
   if (platform === 'win32') {
     return process.env.LOCALAPPDATA
-      ? join(process.env.LOCALAPPDATA, 'ms-playwright')
-      : join(home, 'AppData', 'Local', 'ms-playwright');
+      ? win32.join(process.env.LOCALAPPDATA, 'ms-playwright')
+      : win32.join(home, 'AppData', 'Local', 'ms-playwright');
   }
-  return join(home, '.cache', 'ms-playwright');
+  return posix.join(home, '.cache', 'ms-playwright');
 }
 
 export function cachedChromiumExecutables(
@@ -115,6 +115,59 @@ async function launchRenderBrowser(
       `Playwright's bundled Chromium is missing and no cached/system browser could be launched. Tried cached Chromium plus ${systemBrowserChannels().join(', ')}. ${failures.join(' | ')}`,
     );
   }
+}
+
+async function parkGsapTimeline(page: import('playwright').Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      const w = window as unknown as {
+        __hvGsapParked?: boolean;
+        gsap?: {
+          globalTimeline?: {
+            pause?: (time?: number, suppressEvents?: boolean) => unknown;
+          };
+        };
+      };
+      const timeline = w.gsap?.globalTimeline;
+      if (typeof timeline?.pause !== 'function') return;
+      w.__hvGsapParked = true;
+      timeline.pause(0, true);
+    })
+    .catch(() => {});
+}
+
+async function finishPendingLoadTick(page: import('playwright').Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      const w = window as unknown as { __hvSyntheticLoadFired?: boolean };
+      if (document.readyState === 'complete' || w.__hvSyntheticLoadFired) return;
+      w.__hvSyntheticLoadFired = true;
+      window.stop();
+      window.dispatchEvent(new Event('load'));
+    })
+    .catch(() => {});
+}
+
+async function releaseParkedAnimations(page: import('playwright').Page): Promise<void> {
+  await page
+    .evaluate(() => {
+      const w = window as unknown as {
+        __hvGsapParked?: boolean;
+        __hvUnfreeze?: () => void;
+        gsap?: {
+          globalTimeline?: {
+            play?: (time?: number, suppressEvents?: boolean) => unknown;
+            resume?: () => unknown;
+          };
+        };
+      };
+      w.__hvUnfreeze?.();
+      if (!w.__hvGsapParked) return;
+      const timeline = w.gsap?.globalTimeline;
+      if (typeof timeline?.play === 'function') timeline.play(0, true);
+      else if (typeof timeline?.resume === 'function') timeline.resume();
+    })
+    .catch(() => {});
 }
 
 /** Real render: chromium records the page, ffmpeg transcodes to MP4. */
@@ -310,8 +363,22 @@ export async function render(input: RenderInput, ctx: RenderContext): Promise<Re
       )
       .catch(() => {});
 
-    // Pages sometimes set up animations on the load tick — give a frame
-    // for animations to actually start before we count the duration.
+    // Pages sometimes set up animations on the load tick. Keep GSAP parked
+    // while that setup runs so the pre-record phase cannot consume the opener.
+    await parkGsapTimeline(page);
+
+    // Many agent-generated frames initialize GSAP inside `window.onload`.
+    // We intentionally load only through DOMContentLoaded so slow external
+    // assets cannot add dead seconds to capture. If native load is still
+    // pending after our bounded font wait, trigger one controlled load tick
+    // before probing/recording, otherwise opacity:0 entrance states can persist
+    // for the whole frame.
+    await finishPendingLoadTick(page);
+
+    // The load handler may have registered new timelines; rewind them again so
+    // both native load and synthetic load paths start from the same frame zero.
+    await parkGsapTimeline(page);
+
     await page.waitForTimeout(100);
 
     // Probe the frame's own animation length so we never cut it off. A short
@@ -385,12 +452,8 @@ export async function render(input: RenderInput, ctx: RenderContext): Promise<Re
     // lead-in is always dead and always safe to trim. (Previously only
     // multi-composition templates were parked, so single-file ones recorded
     // their opening during the font wait and showed the fallback-font flash.)
-    await page
-      .evaluate(() => {
-        (window as unknown as { __hvUnfreeze?: () => void }).__hvUnfreeze?.();
-      })
-      .catch(() => {});
     leadInMs = Date.now() - tWebmStart;
+    await releaseParkedAnimations(page);
     void drove; // playback already driven above for multi-composition timelines
 
     ctx.onProgress?.(40, `recording ${totalDuration}s`);
