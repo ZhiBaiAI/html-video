@@ -20,7 +20,8 @@ import {
   probeMediaDurationSec,
 } from '@html-video/core';
 import { extractUrls, fetchSource } from './fetch-source.js';
-import { detectAll, findAgent, spawnAgent } from '@html-video/runtime';
+import { createOpenAiCompatibleAgent, detectAll, detectOne, findAgent, spawnAgent } from '@html-video/runtime';
+import { API_MODEL_PRESETS, type ApiModelProvider } from './agent-api-config.js';
 import {
   allocateNarrationDurations,
   applyFrameMotionTiming,
@@ -60,6 +61,31 @@ const DEFAULT_COSYVOICE_SAMPLE_URL = [
   '&Signature=k9V3dbCdhTD4RTpuwARFC1WGnNQ%3D',
   '&security-token=CAIS2AJ1q6Ft5B2yfSjIr5mEHOzhjKpK7aemen%2FeoTQ%2Fa7wYvaGYqDz2IHhMenRoAu8fv%2FU1nmlQ6%2FsZlrp6SJtIXleCZtF94oxN9h2gb4fb4y1LA2qH08%2FLI3OaLjKm9u2wCryLYbGwU%2FOpbE%2B%2B5U0X6LDmdDKkckW4OJmS8%2FBOZcgWWQ%2FKBlgvRq0hRG1YpdQdKGHaONu0LxfumRCwNkdzvRdmgm4NgsbWgO%2Fks0CD0w2rlLFL%2BdugcsT4MvMBZskvD42Hu8VtbbfE3SJq7BxHybx7lqQs%2B02c5onDXgEKvEzXYrCOq4UycVRjE6IgHKdIt%2FP7jfA9sOHVnITywgxOePlRWjjRQ5ql0E4ehBQP3yBTn9%2FVTJeturjnXvGd24ikVa0RnwBBMhytfsq8tbjo7uXGa%2FbB1hmjSUyYUMumi%2BluDkYtlgzV9eKArlL3Sa2Rv07lcjH7NCtAXxqAAT6Yetg3RRB6Z%2BsfiRqjNnfHABdKlyh38F%2Fvw2aRvgJxA2efFAA5N6MvQY2g6juFRm3amck7ITMezlp1SMVRAhGORlhklC03RCVGB8zcadmvQ0pvS0id0%2BoND0X92QVgN7DPUk98f5uO0TJP9d28fxW8by6sZn8s4%2FFcDtO2o%2BVSIAA%3D',
 ].join('');
+
+function configuredApiAgentDefs(ctx: CliContext) {
+  return ctx.agentApiConfig.list().flatMap((status) => {
+    const profile = ctx.agentApiConfig.resolveByAgentId(status.agentId);
+    return profile
+      ? [createOpenAiCompatibleAgent({
+          id: status.agentId,
+          name: profile.name,
+          apiKey: profile.apiKey,
+          baseUrl: profile.baseUrl,
+          model: profile.model,
+        })]
+      : [];
+  });
+}
+
+function findStudioAgent(ctx: CliContext, id: string) {
+  return findAgent(id) ?? configuredApiAgentDefs(ctx).find((agent) => agent.id === id);
+}
+
+async function detectStudioAgents(ctx: CliContext, opts?: { force?: boolean }) {
+  const builtins = await detectAll(opts);
+  const configured = await Promise.all(configuredApiAgentDefs(ctx).map((agent) => detectOne(agent)));
+  return [...builtins, ...configured];
+}
 
 function resolveUiRoot(): string {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -362,13 +388,13 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (!tmpl) return json(res, 400, { error: `Template ${project.templateId} not found.` });
 
         let agentId = project.agentId;
-        const detectedAgents = await detectAll();
+        const detectedAgents = await detectStudioAgents(ctx);
         if (!agentId) {
           const ready = detectedAgents.filter((a) => a.available && a.id !== 'amr');
           const apiReady = ready.find((a) => a.id === 'anthropic-api');
           agentId = ready.find((a) => a.id !== 'anthropic-api')?.id ?? apiReady?.id ?? 'anthropic-api';
         }
-        const agentDef = findAgent(agentId);
+        const agentDef = findStudioAgent(ctx, agentId);
         if (!agentDef) return json(res, 400, { error: `agent "${agentId}" not registered` });
         const agentAvailable = !!detectedAgents.find((a) => a.id === agentId)?.available;
         if (!agentAvailable && agentDef.kind !== 'http') {
@@ -562,13 +588,13 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         if (nodeIndex < 0) return json(res, 404, { error: `Frame ${nodeId} not found in graph.` });
 
         let agentId = project.agentId;
-        const detectedAgents = await detectAll();
+        const detectedAgents = await detectStudioAgents(ctx);
         if (!agentId) {
           const ready = detectedAgents.filter((a) => a.available && a.id !== 'amr');
           const apiReady = ready.find((a) => a.id === 'anthropic-api');
           agentId = ready.find((a) => a.id !== 'anthropic-api')?.id ?? apiReady?.id ?? 'anthropic-api';
         }
-        const agentDef = findAgent(agentId);
+        const agentDef = findStudioAgent(ctx, agentId);
         if (!agentDef) return json(res, 400, { error: `agent "${agentId}" not registered` });
         const agentAvailable = !!detectedAgents.find((a) => a.id === agentId)?.available;
         if (!agentAvailable && agentDef.kind !== 'http') {
@@ -922,7 +948,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         };
         const agentId = body.agentId;
         if (!agentId) return json(res, 400, { error: 'No agent selected.' });
-        const agentDef = findAgent(agentId);
+        const agentDef = findStudioAgent(ctx, agentId);
         if (!agentDef) return json(res, 400, { error: `agent "${agentId}" not registered` });
         const aspect = normalizeTemplateAspect(body.aspect ?? '16:9');
         const requestedNarrateTemplate = body.templateId
@@ -1172,7 +1198,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             return json(res, 400, { error: 'No frames yet — generate the video first.' });
           }
           if (!body.agentId) return json(res, 400, { error: 'No agent selected.' });
-          const agentDef = findAgent(body.agentId);
+          const agentDef = findStudioAgent(ctx, body.agentId);
           if (!agentDef) return json(res, 400, { error: `agent "${body.agentId}" not registered` });
           const projectDir = await ctx.projects.ensureDir(projectId);
           // Only TextNode carries copy; fall back to label/id for entity/data.
@@ -1446,10 +1472,56 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         return json(res, 200, ctx.mediaConfig.listClonedVoices());
       }
 
+      // Persisted OpenAI-compatible API model profiles. Keys are stored only in
+      // the gitignored .html-video runtime directory and are never returned.
+      if (url.pathname === '/api/config/agent-api' && m === 'GET') {
+        return json(res, 200, { profiles: ctx.agentApiConfig.list(), presets: API_MODEL_PRESETS });
+      }
+      if (url.pathname === '/api/config/agent-api' && m === 'POST') {
+        const body = (await readBody(req)) as {
+          id?: string;
+          name?: string;
+          provider?: ApiModelProvider;
+          baseUrl?: string;
+          model?: string;
+          apiKey?: string;
+        };
+        const provider = body.provider ?? 'custom';
+        if (!['dashscope', 'deepseek', 'custom'].includes(provider)) {
+          return json(res, 400, { error: `Unsupported provider: ${provider}` });
+        }
+        const preset = API_MODEL_PRESETS[provider];
+        try {
+          const profile = ctx.agentApiConfig.upsert({
+            ...(body.id ? { id: body.id } : {}),
+            provider,
+            name: body.name?.trim() || preset.name,
+            baseUrl: body.baseUrl?.trim() || preset.baseUrl,
+            model: body.model?.trim() || preset.model,
+            ...(body.apiKey !== undefined ? { apiKey: body.apiKey } : {}),
+          });
+          const agent = await detectOne(findStudioAgent(ctx, profile.agentId)!);
+          return json(res, 200, { profile, agent });
+        } catch (error) {
+          return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+      const apiConfigMatch = url.pathname.match(/^\/api\/config\/agent-api\/([^/]+)$/);
+      if (apiConfigMatch?.[1] && m === 'DELETE') {
+        const profileId = decodeURIComponent(apiConfigMatch[1]);
+        const agentId = `api-profile-${profileId}`;
+        ctx.agentApiConfig.remove(profileId);
+        for (const summary of await ctx.orchestrator.list()) {
+          const project = await ctx.orchestrator.load(summary.id);
+          if (project.agentId === agentId) await ctx.orchestrator.setAgent(project.id, null, null);
+        }
+        return json(res, 200, { ok: true });
+      }
+
       // Agents (detected on each call; cheap thanks to the in-process cache)
       if (url.pathname === '/api/agents' && m === 'GET') {
         const force = url.searchParams.get('force') === '1';
-        const agents = await detectAll(force ? { force: true } : undefined);
+        const agents = await detectStudioAgents(ctx, force ? { force: true } : undefined);
         return json(res, 200, { agents });
       }
 
@@ -1459,7 +1531,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       const modelsMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/models$/);
       if (modelsMatch && modelsMatch[1] && m === 'GET') {
         const agentId = modelsMatch[1];
-        const def = findAgent(agentId);
+        const def = findStudioAgent(ctx, agentId);
         if (!def) return json(res, 404, { error: `agent "${agentId}" not registered` });
         if (!def.modelSelection) return json(res, 200, { models: [], configurable: false });
         if (agentId !== 'amr') {
@@ -1489,7 +1561,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       if (loginMatch && loginMatch[1] && m === 'POST') {
         const agentId = loginMatch[1];
         if (agentId !== 'amr') return json(res, 400, { error: `agent "${agentId}" has no login flow` });
-        const def = findAgent(agentId);
+        const def = findStudioAgent(ctx, agentId);
         if (!def) return json(res, 404, { error: `agent "${agentId}" not registered` });
         const { resolveBin } = await import('@html-video/runtime');
         const bin = await resolveBin(def);
@@ -1506,7 +1578,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
           });
           if (code !== 0) return json(res, 400, { ok: false, error: `vela login exited with code ${code}` });
           // Re-detect (force) so the agent flips to available immediately.
-          const agents = await detectAll({ force: true });
+          const agents = await detectStudioAgents(ctx, { force: true });
           const amr = agents.find((a) => a.id === 'amr');
           return json(res, 200, { ok: !!amr?.available, available: !!amr?.available, ...(amr?.hint && { hint: amr.hint }) });
         } catch (err) {
@@ -1520,7 +1592,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
       const testMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/test$/);
       if (testMatch && testMatch[1] && m === 'POST') {
         const agentId = testMatch[1];
-        const def = findAgent(agentId);
+        const def = findStudioAgent(ctx, agentId);
         if (!def) return json(res, 404, { error: `agent "${agentId}" not registered` });
         const body = (await readBody(req)) as { model?: string };
         const model = body.model?.trim() || undefined;
@@ -1695,7 +1767,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
         let agentId = project.agentId;
         let detectedAgents: Awaited<ReturnType<typeof detectAll>> | null = null;
         if (!agentId) {
-          detectedAgents = await detectAll();
+          detectedAgents = await detectStudioAgents(ctx);
           // Prefer a real, ready-to-run CLI agent (claude/codex/…). Only fall
           // back to anthropic-api if it's actually configured (has a key) —
           // otherwise picking it would fail mid-flow with "No ANTHROPIC_API_KEY"
@@ -1717,7 +1789,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             }
           }
         }
-        detectedAgents ??= await detectAll();
+        detectedAgents ??= await detectStudioAgents(ctx);
         let agentAvailable = !!detectedAgents.find((a) => a.id === agentId)?.available;
         if (!agentAvailable) {
           const fallbackAgent = detectedAgents.find((a) => a.available && a.id !== 'amr');
@@ -1731,7 +1803,7 @@ export async function startStudioServer(ctx: CliContext, port: number): Promise<
             await ctx.orchestrator.setAgent(id, agentId, null);
           } catch { /* best-effort; this request can still proceed */ }
         }
-        const agentDef = findAgent(agentId);
+        const agentDef = findStudioAgent(ctx, agentId);
         if (!agentDef) {
           return json(res, 400, { error: `agent "${agentId}" not registered` });
         }

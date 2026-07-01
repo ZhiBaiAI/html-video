@@ -94,6 +94,11 @@ const API = {
     body: JSON.stringify({ ...(model ? { model } : {}) }),
   }).then(r => r.json()),
   rescanAgents: () => fetch('/api/agents?force=1').then(r => r.json()),
+  agentApiConfig: () => fetch('/api/config/agent-api').then(readJsonOrThrow),
+  saveAgentApiConfig: body => fetch('/api/config/agent-api', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }).then(readJsonOrThrow),
+  deleteAgentApiConfig: id => fetch(`/api/config/agent-api/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(readJsonOrThrow),
   narrationVoices: () => fetch('/api/config/narration/voices').then(r => r.json()),
   cloneNarrationVoiceFromUrl: b => fetch('/api/config/narration/voices/from-url', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(readApiResult),
   cloneNarrationVoiceRecording: b => fetch('/api/config/narration/voices/recording', { method: 'POST', body: b }).then(readApiResult),
@@ -126,6 +131,12 @@ async function readApiResult(response) {
     data = { error: text || `HTTP ${response.status}` };
   }
   return { ok: response.ok, status: response.status, data };
+}
+
+async function readJsonOrThrow(response) {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
 }
 
 const state = {
@@ -4527,14 +4538,33 @@ async function renderSettingsAudio(panel) {
 }
 
 function renderSettingsAgent(panel) {
-  // Default to local CLI mode; BYOK = anthropic-api which is itself an HTTP agent
+  // Local CLIs are detected; API mode combines the legacy env-backed Anthropic
+  // agent with user-managed OpenAI-compatible profiles.
   const mode = panel.dataset.mode || 'local';
   const agents = state.agents ?? [];
-  const localAgents = agents.filter((a) => a.id !== 'anthropic-api');
-  const httpAgents = agents.filter((a) => a.id === 'anthropic-api');
+  const localAgents = agents.filter((a) => a.kind !== 'http');
+  const httpAgents = agents.filter((a) => a.kind === 'http');
   const list = mode === 'byok' ? httpAgents : localAgents;
   const currentId = state.selected?.agentId
     || (agents.find((a) => a.available)?.id ?? 'anthropic-api');
+
+  if (mode === 'byok' && !state._agentApiConfig && !state._agentApiConfigLoading) {
+    state._agentApiConfigLoading = true;
+    API.agentApiConfig()
+      .then((config) => { state._agentApiConfig = config; })
+      .catch((error) => { state._agentApiConfigError = error?.message ?? String(error); })
+      .finally(() => {
+        state._agentApiConfigLoading = false;
+        if (panel.isConnected) renderSettingsAgent(panel);
+      });
+  }
+  const apiProfiles = state._agentApiConfig?.profiles ?? [];
+  const apiPresets = state._agentApiConfig?.presets ?? {};
+  const editingApiProfile = state._editingAgentApiProfile
+    ? apiProfiles.find((profile) => profile.id === state._editingAgentApiProfile)
+    : null;
+  const formProvider = editingApiProfile?.provider ?? 'dashscope';
+  const formPreset = apiPresets[formProvider] ?? {};
 
   // Catalog-backed agents (currently AMR) load their real model list lazily.
   // Custom-model CLIs do not need a catalog: the value is the exact id their
@@ -4571,13 +4601,43 @@ function renderSettingsAgent(panel) {
     </div>
 
     ${mode === 'byok' ? `
-      <div class="panel-sub" style="margin-bottom:14px">
-        ${esc(t('settings.agent.byok.intro'))}
-        <ul style="margin:6px 0 0 18px;padding:0;font-family:var(--font-mono);font-size:11.5px">
-          <li>${esc(t('settings.agent.byok.env_key'))}</li>
-          <li>${esc(t('settings.agent.byok.env_base'))}</li>
-        </ul>
-      </div>
+      <section class="api-model-editor">
+        <div class="api-model-editor-head">
+          <div>
+            <b>${esc(editingApiProfile ? t('settings.agent.api.edit_title') : t('settings.agent.api.add_title'))}</b>
+            <span>${esc(t('settings.agent.api.intro'))}</span>
+          </div>
+          ${editingApiProfile ? `<button type="button" data-api-cancel>${esc(t('settings.agent.api.cancel_edit'))}</button>` : ''}
+        </div>
+        ${state._agentApiConfigLoading ? `<div class="api-model-loading">${esc(t('settings.agent.api.loading'))}</div>` : `
+          <div class="api-model-grid">
+            <label><span>${esc(t('settings.agent.api.provider'))}</span>
+              <select data-api-provider>
+                <option value="dashscope"${formProvider === 'dashscope' ? ' selected' : ''}>${esc(t('settings.agent.api.provider_dashscope'))}</option>
+                <option value="deepseek"${formProvider === 'deepseek' ? ' selected' : ''}>${esc(t('settings.agent.api.provider_deepseek'))}</option>
+                <option value="custom"${formProvider === 'custom' ? ' selected' : ''}>${esc(t('settings.agent.api.provider_custom'))}</option>
+              </select>
+            </label>
+            <label><span>${esc(t('settings.agent.api.name'))}</span>
+              <input data-api-name value="${esc(editingApiProfile?.name ?? formPreset.name ?? '')}" />
+            </label>
+            <label class="wide"><span>${esc(t('settings.agent.api.base_url'))}</span>
+              <input data-api-base value="${esc(editingApiProfile?.baseUrl ?? formPreset.baseUrl ?? '')}" placeholder="https://…/v1" />
+            </label>
+            <label><span>${esc(t('settings.agent.api.model'))}</span>
+              <input data-api-model value="${esc(editingApiProfile?.model ?? formPreset.model ?? '')}" placeholder="qwen-plus" />
+            </label>
+            <label><span>${esc(t('settings.agent.api.key'))}</span>
+              <input data-api-key type="password" autocomplete="new-password"
+                placeholder="${esc(editingApiProfile?.configured ? t('settings.agent.api.key_keep') : 'sk-…')}" />
+            </label>
+          </div>
+          <div class="api-model-editor-foot">
+            <span data-api-state>${esc(state._agentApiConfigError ?? t('settings.agent.api.storage_hint'))}</span>
+            <button type="button" class="primary-action" data-api-save>${esc(editingApiProfile ? t('settings.agent.api.update') : t('settings.agent.api.save'))}</button>
+          </div>
+        `}
+      </section>
     ` : ''}
 
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -4592,6 +4652,7 @@ function renderSettingsAgent(panel) {
     <div class="agent-list">
       ${list.map((a) => {
         const isCurrent = a.id === currentId && a.available;
+        const apiProfile = apiProfiles.find((profile) => profile.agentId === a.id);
         const currentModel = isCurrent ? (state.selected?.agentModel ?? '') : '';
         const catalog = state._agentModelCatalogs[a.id];
         const desc = AGENT_DESC[a.id] || (a.bin ?? '');
@@ -4613,6 +4674,7 @@ function renderSettingsAgent(panel) {
                   ? `<span style="font-size:11px;color:var(--accent);font-family:var(--font-mono)">${esc(t('settings.agent.in_use'))}</span>`
                   : `<button data-act="use" class="primary-action" style="background:var(--accent);border-color:var(--accent);color:var(--accent-fg)">${esc(t('settings.agent.use'))}</button>`)
               : (a.installUrl ? `<a href="${a.installUrl}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text-faint)">${esc(t('settings.agent.install'))}</a>` : '')}
+            ${apiProfile ? `<button data-act="api-edit">${esc(t('settings.agent.api.edit'))}</button><button data-act="api-delete" class="danger">${esc(t('settings.agent.api.delete'))}</button>` : ''}
           </div>
           ${a.modelSelection ? `<div class="agent-model-config">
             <div class="agent-model-copy">
@@ -4646,6 +4708,49 @@ function renderSettingsAgent(panel) {
       renderSettingsAgent(panel);
     };
   });
+  const providerSelect = panel.querySelector('[data-api-provider]');
+  if (providerSelect) {
+    providerSelect.onchange = () => {
+      const preset = state._agentApiConfig?.presets?.[providerSelect.value];
+      if (!preset) return;
+      panel.querySelector('[data-api-name]').value = preset.name ?? '';
+      panel.querySelector('[data-api-base]').value = preset.baseUrl ?? '';
+      panel.querySelector('[data-api-model]').value = preset.model ?? '';
+    };
+  }
+  const cancelApiEdit = panel.querySelector('[data-api-cancel]');
+  if (cancelApiEdit) cancelApiEdit.onclick = () => {
+    state._editingAgentApiProfile = null;
+    renderSettingsAgent(panel);
+  };
+  const saveApiProfile = panel.querySelector('[data-api-save]');
+  if (saveApiProfile) saveApiProfile.onclick = async () => {
+    const status = panel.querySelector('[data-api-state]');
+    saveApiProfile.disabled = true;
+    status.textContent = t('settings.agent.api.saving');
+    try {
+      const saved = await API.saveAgentApiConfig({
+        ...(editingApiProfile?.id ? { id: editingApiProfile.id } : {}),
+        provider: panel.querySelector('[data-api-provider]').value,
+        name: panel.querySelector('[data-api-name]').value.trim(),
+        baseUrl: panel.querySelector('[data-api-base]').value.trim(),
+        model: panel.querySelector('[data-api-model]').value.trim(),
+        apiKey: panel.querySelector('[data-api-key]').value.trim(),
+      });
+      state._agentApiConfig = await API.agentApiConfig();
+      state.agents = (await API.rescanAgents()).agents ?? state.agents;
+      state._editingAgentApiProfile = null;
+      if (state.selected && saved.agent?.id) {
+        await API.setAgent(state.selected.id, saved.agent.id, saved.profile.model);
+        state.selected = (await API.getProject(state.selected.id)).project;
+      }
+      renderSettingsAgent(panel);
+      toast(t('settings.agent.api.saved', { name: saved.profile.name }), 'success');
+    } catch (error) {
+      status.textContent = error?.message ?? String(error);
+      saveApiProfile.disabled = false;
+    }
+  };
   panel.querySelectorAll('.btn-rescan').forEach((btn) => {
     btn.onclick = async () => {
       btn.disabled = true;
@@ -4681,6 +4786,24 @@ function renderSettingsAgent(panel) {
         state.selected = (await API.getProject(state.selected.id)).project;
         renderSettingsAgent(panel);
         toast(model ? t('settings.agent.model_saved', { model }) : t('settings.agent.model_default_saved'), 'success');
+      } else if (act === 'api-edit') {
+        const profile = apiProfiles.find((item) => item.agentId === aid);
+        if (!profile) return;
+        state._editingAgentApiProfile = profile.id;
+        renderSettingsAgent(panel);
+      } else if (act === 'api-delete') {
+        const profile = apiProfiles.find((item) => item.agentId === aid);
+        if (!profile || !confirm(t('settings.agent.api.delete_confirm', { name: profile.name }))) return;
+        await API.deleteAgentApiConfig(profile.id);
+        state._agentApiConfig = await API.agentApiConfig();
+        state.agents = (await API.rescanAgents()).agents ?? state.agents;
+        if (state.selected?.agentId === aid) {
+          const fallback = state.agents.find((item) => item.available && item.kind !== 'http');
+          await API.setAgent(state.selected.id, fallback?.id ?? null, null);
+          state.selected = (await API.getProject(state.selected.id)).project;
+        }
+        renderSettingsAgent(panel);
+        toast(t('settings.agent.api.deleted'), 'success');
       } else if (act === 'test') {
         const result = panel.querySelector(`[data-test-result="${aid}"]`);
         result.style.display = 'block';

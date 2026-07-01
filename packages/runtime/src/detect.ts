@@ -72,6 +72,7 @@ export async function detectOne(def: AgentDef): Promise<DetectedAgent> {
       ...(probe.version !== undefined && { version: probe.version }),
       ...(def.installUrl !== undefined && { installUrl: def.installUrl }),
       ...(def.modelSelection !== undefined && { modelSelection: def.modelSelection }),
+      kind: def.kind ?? 'child',
     };
   }
   const path = await resolveBin(def);
@@ -83,6 +84,7 @@ export async function detectOne(def: AgentDef): Promise<DetectedAgent> {
       available: false,
       ...(def.installUrl !== undefined && { installUrl: def.installUrl }),
       ...(def.modelSelection !== undefined && { modelSelection: def.modelSelection }),
+      kind: def.kind ?? 'child',
     };
   }
   let version = await probeVersion(path, def.versionArgs);
@@ -100,6 +102,7 @@ export async function detectOne(def: AgentDef): Promise<DetectedAgent> {
       ...(extra.hint !== undefined && { hint: extra.hint }),
       ...(def.installUrl !== undefined && { installUrl: def.installUrl }),
       ...(def.modelSelection !== undefined && { modelSelection: def.modelSelection }),
+      kind: def.kind ?? 'child',
     };
   }
   return {
@@ -111,6 +114,7 @@ export async function detectOne(def: AgentDef): Promise<DetectedAgent> {
     version,
     ...(def.installUrl !== undefined && { installUrl: def.installUrl }),
     ...(def.modelSelection !== undefined && { modelSelection: def.modelSelection }),
+    kind: def.kind ?? 'child',
   };
 }
 

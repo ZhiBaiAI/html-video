@@ -5,3 +5,5 @@ export { spawnAgent } from './spawn.js';
 export type { SpawnOptions } from './spawn.js';
 export { listAmrModels } from './defs/amr.js';
 export type { AmrModel } from './defs/amr.js';
+export { createOpenAiCompatibleAgent, openAiChatCompletionsUrl } from './defs/openai-compatible-api.js';
+export type { OpenAiCompatibleAgentConfig } from './defs/openai-compatible-api.js';

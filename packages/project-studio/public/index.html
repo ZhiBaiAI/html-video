@@ -170,6 +170,28 @@
     font-size: 12.5px; font-family: inherit; transition: background .12s, color .12s; }
   .settings-mode-tabs button.active { background: var(--bg-panel); color: var(--text);
     box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .api-model-editor { margin: 0 0 18px; padding: 14px; border: 1px solid var(--accent);
+    border-radius: var(--radius); background: var(--accent-soft); }
+  .api-model-editor-head { display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px; margin-bottom: 12px; }
+  .api-model-editor-head > div { display: flex; flex-direction: column; gap: 3px; }
+  .api-model-editor-head b { font-size: 13px; color: var(--text); }
+  .api-model-editor-head span, .api-model-loading { font-size: 11px; line-height: 1.45; color: var(--text-muted); }
+  .api-model-editor-head button { border: 0; background: transparent; color: var(--text-muted);
+    cursor: pointer; font-size: 11px; }
+  .api-model-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .api-model-grid label { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .api-model-grid label.wide { grid-column: 1 / -1; }
+  .api-model-grid label > span { font-size: 10.5px; color: var(--text-muted); }
+  .api-model-grid input, .api-model-grid select { width: 100%; min-width: 0; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-panel);
+    color: var(--text); padding: 8px 10px; font: 11.5px var(--font-mono); }
+  .api-model-grid input:focus, .api-model-grid select:focus { outline: none; border-color: var(--accent); }
+  .api-model-editor-foot { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .api-model-editor-foot > span { flex: 1; min-width: 0; font-size: 10.5px; color: var(--text-muted); }
+  .api-model-editor-foot button { border: 1px solid var(--accent); border-radius: var(--radius-sm);
+    background: var(--accent); color: var(--accent-fg); padding: 7px 13px; cursor: pointer; font-size: 11.5px; }
+  .agent-card .agent-actions button.danger { color: var(--red, #c83b3b); }
   .agent-card { display: grid; grid-template-columns: 36px 1fr auto;
     gap: 12px; align-items: center; padding: 12px 14px;
     border: 1px solid var(--border); border-radius: var(--radius);
@@ -215,6 +237,8 @@
   .settings-panel .agent-test-result.ok { color: var(--green, #4ade80); }
   .settings-panel .agent-test-result.error { color: rgb(220, 60, 60); }
   @media (max-width: 760px) {
+    .api-model-grid { grid-template-columns: 1fr; }
+    .api-model-grid label.wide { grid-column: auto; }
     .agent-card .agent-model-config { grid-column: 1 / -1; grid-template-columns: 1fr; }
     .agent-card .agent-model-config .model-save { justify-self: start; }
   }

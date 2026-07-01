@@ -211,8 +211,10 @@ Auto-detected on your `PATH`; switch the active one from the studio's top bar. T
 | **GitHub Copilot CLI** | `copilot` | `copilot --allow-all-tools`, prompt via stdin |
 | **Aider** | `aider` | `aider --message <prompt>` |
 | **Anthropic API** | BYOK | Direct Messages API — works with no CLI installed |
+| **OpenAI-compatible API** | Settings → Agent → BYOK | Saved profiles for Alibaba Model Studio/Qwen, DeepSeek, or a custom Chat Completions endpoint |
 
-Nothing installed? Set an Anthropic key and the studio talks to the Messages API directly.
+Nothing installed? Add an API model profile in Studio. The API key stays in the local,
+gitignored `.html-video/agent-api-config.json`; projects persist only the selected agent/model id.
 
 ---
 

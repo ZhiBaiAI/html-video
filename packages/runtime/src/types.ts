@@ -105,6 +105,7 @@ export interface DetectedAgent {
   /** Why it's unavailable / what to do — e.g. AMR found but not logged in. */
   hint?: string;
   modelSelection?: AgentDef['modelSelection'];
+  kind?: 'child' | 'http';
 }
 
 export type AgentEvent =
